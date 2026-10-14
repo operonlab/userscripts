@@ -1,0 +1,7 @@
+{
+  "name": { "message": "Dual Subs" },
+  "short_name": { "message": "Dual Subs" },
+  "description": {
+    "message": "Two caption lines on YouTube: your language on top, the original below. Uses YouTube's own captions; collects no data."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": { "message": "双语字幕 Dual Subs" },
+  "short_name": { "message": "双语字幕" },
+  "description": {
+    "message": "YouTube 双语字幕：上方是你的语言，下方是原文。只用 YouTube 自己的字幕，不收集任何数据。"
+  }
+}

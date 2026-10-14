@@ -18,6 +18,15 @@ In Chrome 138 and later, Tampermonkey runs scripts only after you turn on **Allo
 - **Checks**: `bash scripts/release-check.sh` runs every script's `test/*.test.mjs`, checks the headers and changelog, and scans for local paths and tokens. CI runs it on every push. It exits `0` ready, `1` something to fix, `2` could not check.
 - Add a row to the table above.
 
+## Store extension (optional)
+
+A script that should reach people who will not install a userscript manager can also ship as a Chrome extension, built from the same file:
+
+- `<name>/extension/` holds `manifest.json` (no `version`; it is taken from `@version`), `_locales/`, `icon.svg` and the `icons/` rendered from it by `scripts/render-icons.py`.
+- `bash scripts/build-extension.sh <name>` writes `dist/<name>/` (load it unpacked) and `dist/<name>-<version>.zip` (upload it to the store). It refuses a template whose matches or run-at differ from the userscript header, or a script that uses `GM_` APIs.
+- Only `@grant none` scripts qualify: the content script runs in the page's main world, as the userscript does.
+- Fixes reach userscript users as soon as they are pushed; the store version follows after its review. Both channels can be installed at once; the second copy stays off.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

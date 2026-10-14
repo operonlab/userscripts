@@ -1,3 +1,4 @@
 # e2e screenshots; the ones worth showing are copied into <script>/docs/ by hand
 */test/shots/
 __pycache__/
+dist/

@@ -40,6 +40,18 @@ for f in */*.user.js; do
   # managers update only when @version goes up, so every version a user can receive has an entry
   grep -qE "^## ${version_re}( |$)" "$dir/CHANGELOG.md" 2>/dev/null ||
     problem "$dir/CHANGELOG.md: no '## $version' entry"
+  # a script with a store extension: its template must still agree with the userscript
+  if [ -d "$dir/extension" ]; then
+    tmp=$(mktemp -d) || cannot "mktemp failed"
+    built=$(bash scripts/build-extension.sh "$dir" "$tmp" 2>&1)
+    brc=$?
+    rm -rf "$tmp"
+    case $brc in
+      0) ;;
+      1) printf '%s\n' "$built"; problem "$dir: extension template" ;;
+      *) cannot "$dir: extension build did not run: $built" ;;
+    esac
+  fi
 done
 
 # 3. leak scan over every file that would be published, tracked or new
