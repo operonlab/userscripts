@@ -2,10 +2,12 @@
 
 Everything the developer dashboard asks for, in the order it asks. Upload `dist/yt-dual-subs-<version>.zip` from `bash scripts/build-extension.sh yt-dual-subs`.
 
+**Submit only after this folder is on `main` of github.com/operonlab/userscripts**: the privacy-policy and homepage URLs below must resolve when the reviewer opens them.
+
 ## Package
 
 - **Name / short description**: come from the zip (`_locales/*/messages.json`); the dashboard shows them read-only.
-- **Languages**: English (default), 中文（繁體）, 中文（香港）, 中文（简体）. Add a listing description for each below; zh-HK reuses zh-TW.
+- **Languages**: English (default), 中文（繁體）, 中文（简体）. Add a listing description for each below. (Chrome has no zh_HK locale; Hong Kong users see the zh_TW or English text.)
 
 ## Store listing
 
@@ -26,6 +28,7 @@ Watch YouTube with two caption lines: your language on top, the original languag
 • Auto-generated captions stay steady: one sentence at a time, no jumping lines.
 • A settings menu beside the CC button, in the player's own style: on/off, top and bottom language (with search), box colour and opacity, line gap and sizes.
 • YouTube's own captions are never hidden. If anything goes wrong, you still have them.
+• To put the original language on the bottom line, it may switch the player's caption track, the same as picking one from the CC menu; while both lines show, it restyles the player's caption to match.
 
 Privacy: collects no data at all. It runs only on youtube.com, talks only to youtube.com, and keeps your settings in your own browser. Policy: https://github.com/operonlab/userscripts/blob/main/yt-dual-subs/PRIVACY.md
 
@@ -35,7 +38,7 @@ Also available as a userscript for Tampermonkey / Violentmonkey.
 Not affiliated with or endorsed by YouTube or Google.
 ```
 
-### Description: 中文（繁體）／中文（香港）
+### Description: 中文（繁體）
 
 ```
 用兩行字幕看 YouTube：上方是你的語言，下方緊貼著原文，就像經典港片的中英字幕。
@@ -46,6 +49,7 @@ Not affiliated with or endorsed by YouTube or Google.
 • 自動產生的字幕不再跳動：一次一句，不會上下亂跳。
 • CC 按鈕旁有設定選單，樣式跟播放器一致：開關、上下語言（可搜尋）、底色與透明度、行距與字級。
 • 從不隱藏 YouTube 原本的字幕，萬一出問題，原生字幕照樣在。
+• 為了讓下方顯示原文，它可能會切換播放器的字幕軌，效果跟你自己從 CC 選單挑一條一樣；兩行同時顯示時，會把播放器的字幕改成相配的樣式。
 
 隱私：完全不蒐集資料。只在 youtube.com 執行、只連 youtube.com，設定存在你自己的瀏覽器。隱私權政策：https://github.com/operonlab/userscripts/blob/main/yt-dual-subs/PRIVACY.md
 
@@ -66,6 +70,7 @@ Not affiliated with or endorsed by YouTube or Google.
 • 自动生成的字幕不再跳动：一次一句，不会上下乱跳。
 • CC 按钮旁有设置菜单，样式与播放器一致：开关、上下语言（可搜索）、底色与透明度、行距与字号。
 • 从不隐藏 YouTube 原本的字幕，万一出问题，原生字幕照样在。
+• 为了让下方显示原文，它可能会切换播放器的字幕轨，效果跟你自己从 CC 菜单选一条一样；两行同时显示时，会把播放器的字幕改成相配的样式。
 
 隐私：完全不收集数据。只在 youtube.com 运行、只连接 youtube.com，设置保存在你自己的浏览器里。隐私政策：https://github.com/operonlab/userscripts/blob/main/yt-dual-subs/PRIVACY.md
 

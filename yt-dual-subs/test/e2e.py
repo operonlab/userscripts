@@ -14,8 +14,9 @@ retries pot-less requests and shows ads on its own schedule, so comparing a nati
 with a line sample taken seconds later measures the player, not the script.
 
 YTDS_ENGINE=chrome-ext (with YTDS_CHROME=<Chrome or Chromium executable>) runs the same checks
-on the store extension instead: scripts/build-extension.sh builds it into a temp folder and
-headless Chromium loads it unpacked, so the bytes measured are the bytes the zip holds. Chromium
+on the store extension instead: scripts/build-extension.sh builds it into a temp folder, the
+harness unpacks the store zip and headless Chromium loads that, so the bytes measured are the
+bytes the zip holds. Chromium
 must not announce automation (--enable-automation sets navigator.webdriver, and YouTube then
 answers every caption request with an empty body). The transport check stays Camoufox-only:
 there the harness can wrap the script itself, here YouTube's own wrappers load in between.
@@ -34,11 +35,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import parse_qs, urlparse
 
 from camoufox.sync_api import Camoufox
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 SCRIPT = Path(__file__).resolve().parent.parent / "yt-dual-subs.user.js"
@@ -135,9 +138,13 @@ def wait_out_ads(page, vid):
             return
         if page.evaluate(LINE):
             done(1, f"{vid}: line visible during an ad: {page.evaluate(LINE)!r}")
-        page.evaluate(
-            "mw:document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button-modern')?.click()"
-        )
+        # a viewer's click: a scripted .click() on the skip button is ignored, and Chromium is served long skippable ads
+        skip = page.locator(".ytp-skip-ad-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button").first
+        try:
+            if skip.is_visible():
+                skip.click(timeout=2000)
+        except PlaywrightError:
+            pass  # not clickable yet (still counting down); the loop tries again and ends unverifiable at 90s
         time.sleep(1)
     done(2, f"{vid}: ad still playing after 90s")
 
@@ -412,7 +419,8 @@ def check_video(browser, vid, want_plan, want_source, check_cc_off, asr=False):
     if page.evaluate("mw:typeof window.__ytdsState") != "object":
         if ENGINE == "camoufox":
             done(2, f"{vid}: script not in the page (HTML had no nonce'd <script> to inject next to?)")
-        done(1, f"{vid}: the extension is loaded but its content script did not run on the watch page")
+        # a headless mode that loads no extensions would land here too; the Chromium this was written against loads it
+        done(1, f"{vid}: the extension's content script did not run on the watch page")
     if ENGINE == "camoufox" and page.evaluate("mw:window.__ytdsTransportUntouched") is not True:
         done(1, f"{vid}: the script replaced XMLHttpRequest.prototype.open or fetch")
 
@@ -600,7 +608,13 @@ def run_chrome_extension():
             done(1, f"the extension template disagrees with the userscript: {build.stdout.strip()}")
         if build.returncode != 0:
             done(2, f"the extension did not build: {build.stdout.strip()} {build.stderr.strip()}")
-        ext = f"{tmp}/dist/{SCRIPT.parent.name}"
+        # load what the store zip holds, not the folder it was made from
+        zips = list(Path(tmp, "dist").glob(f"{SCRIPT.parent.name}-*.zip"))
+        if len(zips) != 1:
+            done(2, f"expected one built zip, found {[z.name for z in zips]}")
+        ext = f"{tmp}/unzipped"
+        with zipfile.ZipFile(zips[0]) as z:
+            z.extractall(ext)
         with sync_playwright() as p:
             ctx = p.chromium.launch_persistent_context(
                 f"{tmp}/profile",

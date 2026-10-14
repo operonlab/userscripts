@@ -4,7 +4,8 @@ Userscript managers update a script only when `@version` goes up, so every versi
 
 ## 0.5.1 — 2026-10-15
 
-- Also available as a Chrome extension, "Dual Subs / 雙語字幕", built from this same script. Use one or the other: if both are installed, the second copy turns itself off (a note appears in the browser console), so you never get two lines or two buttons.
+- Also available as a Chrome extension, "Dual Subs / 雙語字幕", built from this same script. Use one or the other: if both are installed, the second copy turns itself off (a note appears in the browser console), so you never get two lines or two buttons. Copies before 0.5.1 do not check, so update the userscript before adding the extension.
+- Only YouTube's own caption requests (www.youtube.com/api/timedtext) are ever fetched again; a lookalike URL on any other host is ignored.
 - Verified on Chromium as well as Firefox.
 
 ## 0.5.0 — 2026-10-15

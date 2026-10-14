@@ -23,7 +23,7 @@ In Chrome 138 and later, Tampermonkey runs scripts only after you turn on **Allo
 A script that should reach people who will not install a userscript manager can also ship as a Chrome extension, built from the same file:
 
 - `<name>/extension/` holds `manifest.json` (no `version`; it is taken from `@version`), `_locales/`, `icon.svg` and the `icons/` rendered from it by `scripts/render-icons.py`.
-- `bash scripts/build-extension.sh <name>` writes `dist/<name>/` (load it unpacked) and `dist/<name>-<version>.zip` (upload it to the store). It refuses a template whose matches or run-at differ from the userscript header, or a script that uses `GM_` APIs.
+- `bash scripts/build-extension.sh <name>` writes `dist/<name>/` (load it unpacked) and `dist/<name>-<version>.zip` (upload it to the store). It refuses a template whose matches, run-at or frames differ from the userscript header, a script that uses `GM_` APIs, and any manifest key (a permission, say) that the store's privacy answers in `<name>/store/listing.md` were not written for; the checks live in `scripts/check-extension.cjs`.
 - Only `@grant none` scripts qualify: the content script runs in the page's main world, as the userscript does.
 - Fixes reach userscript users as soon as they are pushed; the store version follows after its review. Both channels can be installed at once; the second copy stays off.
 

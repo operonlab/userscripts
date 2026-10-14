@@ -10,6 +10,8 @@ What it does touch, all inside your own browser:
 - **Your settings.** On/off, the two languages, box colour, gap and sizes are saved in youtube.com's local storage in your browser, under the key `ytds-settings`. They never leave your browser. Clearing youtube.com's site data deletes them; removing the extension leaves that small record in place, unused.
 - **Your browser language** is read once to choose the default top language.
 
+What it changes on the page: it adds its caption line, a button and a menu to the player; it may switch the player's caption track (the same as picking one from the CC menu) so the original language is on the bottom line; and while both lines show, it restyles the player's caption to match.
+
 It runs only on `https://www.youtube.com/*`. It does not load or run code from anywhere else.
 
 Questions: https://github.com/operonlab/userscripts/issues
@@ -27,6 +29,8 @@ Questions: https://github.com/operonlab/userscripts/issues
 - **YouTube 的字幕檔**：在 YouTube 觀看頁上，讀取 YouTube 播放器自己發出的字幕請求，再向 YouTube 要同一份字幕的第二種語言（YouTube 自己的翻譯）。這些請求只送往 youtube.com，跟播放器自己的請求一樣。
 - **你的設定**：開關、上下語言、底色、間距與字級，存在你瀏覽器裡 youtube.com 的本機儲存空間（`ytds-settings`），不會離開你的瀏覽器。清除 youtube.com 的網站資料就會刪除；移除擴充後這筆小紀錄會留著，但不再被使用。
 - **瀏覽器語言**：只讀取一次，用來決定預設的上方語言。
+
+它對頁面做的改變：在播放器加上它的字幕行、一個按鈕和一個選單；為了讓下方顯示原文，可能會切換播放器的字幕軌（跟你自己從 CC 選單挑一條一樣）；兩行同時顯示時，會把播放器的字幕改成相配的樣式。
 
 只在 `https://www.youtube.com/*` 上執行，不會從其他地方載入或執行程式碼。
 
