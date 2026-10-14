@@ -897,10 +897,21 @@
     if (menu && !menu.contains(e.target) && !e.target.closest?.('.ytds-button')) closeMenu(false);
   }, true);
 
+  // the player's own caption requests, and nothing that merely looks like one: the URL is fetched again with
+  // credentials, so a lookalike on another host must never get that far
+  const isPlayerCaptions = (url) => {
+    try {
+      const u = new URL(url);
+      return u.origin === 'https://www.youtube.com' && u.pathname === '/api/timedtext';
+    } catch {
+      return false;
+    }
+  };
+
   // Observing finished requests instead of patching XHR/fetch: works for either transport and leaves the page's own APIs untouched
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) {
-      if (e.name.includes('/api/timedtext') && !ownUrls.has(e.name)) load(e.name);
+      if (isPlayerCaptions(e.name) && !ownUrls.has(e.name)) load(e.name);
     }
   }).observe({ type: 'resource', buffered: true });
 

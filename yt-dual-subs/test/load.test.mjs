@@ -117,6 +117,18 @@ test('loads the translated track from the player request', async () => {
   assert.equal(p.state.cues, 3);
 });
 
+test('caption-looking requests to any host but www.youtube.com are never fetched again', async () => {
+  const p = page();
+  for (const host of ['https://evil.example', 'https://www.youtube.com.evil.example', 'http://www.youtube.com']) {
+    p.request(PLAYER('P1').replace('https://www.youtube.com', host));
+  }
+  await settle();
+  assert.equal(p.calls.length, 0);
+  p.request(PLAYER('P1'));
+  await settle();
+  assert.equal(p.calls.length, 1);
+});
+
 test('a second copy in the same page stands down and the first keeps working', async () => {
   const p = page();
   const first = p.current();
