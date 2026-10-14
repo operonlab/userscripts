@@ -20,6 +20,7 @@ Exit: 0 pass
 """
 
 import json
+import os
 import re
 import statistics
 import sys
@@ -51,7 +52,7 @@ SIZE_RATIO = 1.2  # the Chinese line must be at least this much larger than the 
 TIGHT = 0.35  # largest gap between the lines, as a fraction of the Chinese font size
 CENTER_TOLERANCE = 0.15  # largest distance between the two lines' centres, same unit
 ROLLUP_LINE = 1.6  # one native line, as a multiple of its font size (line height plus box padding)
-SHOTS = Path.home() / "workshop/outputs/yt-dual-subs"
+SHOTS = Path(os.environ.get("YTDS_SHOTS") or Path(__file__).resolve().parent / "shots")
 SHOTS.mkdir(parents=True, exist_ok=True)
 
 LINE = """mw:(() => { const el = document.getElementById('ytds-line');
@@ -255,6 +256,30 @@ def inject(route):
 
 KANA = re.compile(r"[぀-ヿ]")
 STORED = "mw:JSON.parse(localStorage.getItem('ytds-settings') || 'null')"
+# the open language page: no language twice, and the "all" group in the interface language's order
+LANGUAGE_LIST = """mw:(() => {
+  const menu = document.getElementById('ytds-menu');
+  const codes = [...menu.querySelectorAll('[data-lang]')].map((e) => e.dataset.lang);
+  const groups = menu.querySelectorAll('.ytds-group');
+  const names = [];
+  for (let e = groups[groups.length - 1].nextElementSibling; e && e.dataset.lang; e = e.nextElementSibling)
+    names.push(e.textContent);
+  const collator = new Intl.Collator(document.documentElement.lang || undefined);
+  return { dupes: codes.filter((c, i) => codes.indexOf(c) !== i), rest: names.length,
+           sorted: names.every((n, i) => i === 0 || collator.compare(names[i - 1], n) <= 0) };
+})()"""
+# ArrowDown in the search box: an input method's candidate pick stays in the box, a plain one moves into the list
+SEARCH_KEYS = """mw:(() => {
+  const box = document.querySelector('#ytds-menu input[name=search]');
+  const where = () => document.activeElement === box ? 'search'
+    : document.activeElement?.dataset?.lang ? 'lang' : String(document.activeElement?.tagName);
+  const press = (init) => {
+    box.focus();
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true, ...init }));
+    return where();
+  };
+  return { composing: press({ isComposing: true }), plain: press({}) };
+})()"""
 
 
 def set_field(page, name, value, event="input"):
@@ -300,6 +325,12 @@ def check_panel(page, vid):
     page.locator("#ytds-menu .ytds-back").click(timeout=5000)
     page.locator("#ytds-menu [data-go=top]").click(timeout=5000)
     page.locator("#movie_player").screenshot(path=str(SHOTS / "menu-top.png"))
+    listing = page.evaluate(LANGUAGE_LIST)
+    if listing["dupes"] or listing["rest"] < 20 or not listing["sorted"]:
+        done(1, f"{vid}: language page lists a language twice or out of order: {listing}")
+    keys = page.evaluate(SEARCH_KEYS)
+    if keys != {"composing": "search", "plain": "lang"}:
+        done(1, f"{vid}: ArrowDown in the search box (input method composing, then plain) went to {keys}")
     page.locator('#ytds-menu [data-lang="ja"]').first.click(timeout=5000)
     if until(page, LINE, lambda t: bool(t and KANA.search(t)), 25) is None:
         done(1, f"{vid}: top language set to Japanese, line shows {page.evaluate(LINE)!r}; state={page.evaluate(STATE)}")

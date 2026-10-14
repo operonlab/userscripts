@@ -1,31 +1,38 @@
-# yt-dual-subs
+# YouTube Dual Subtitles
 
-A Tampermonkey userscript for bilingual YouTube captions in the style of old Hong Kong film subtitles. Your language sits on top as the larger line. The original language sits directly below as the smaller line. Both lines are centred together on a caption box. A video already in your language keeps YouTube's ordinary single line. All tracks come from YouTube itself: human tracks, or its own `tlang` translation. There is no external API, no key, and nothing to pay.
+A userscript for bilingual YouTube captions in the style of old Hong Kong film subtitles. Your language sits on top as the larger line. The original language sits directly below as the smaller line. Both lines are centred together on a caption box. A video already in your language keeps YouTube's ordinary single line. All tracks come from YouTube itself: human tracks, or its own `tlang` translation. There is no external API, no key, and nothing to pay.
 
-It replaces the "YouTube™ Dual Subtitles" Chrome extension. That extension is closed source (no license, minified bundle, last store update 2024-11-29), and it ships a static `#ytp-caption-window-container{display:none!important}`. Whenever its own renderer failed, Chrome showed no captions at all.
+![A TED talk with its human Traditional Chinese track on top and the English captions below](docs/captions.png)
+
+<sub>Frame from Ken Robinson, "Do schools kill creativity?" (TED, CC BY-NC-ND 4.0).</sub>
+
+![The settings menu open beside the CC button](docs/menu.png)
+
+It was written to replace a closed-source dual-subtitle extension that hides YouTube's own caption container with a static style rule, so that whenever its renderer failed, no captions showed at all.
 
 ## Two rules the design keeps
 
 - **It never hides the native captions.** The bottom line *is* YouTube's own caption. While the top line shows, the script restyles it (size, box, centred text). If this script breaks, you still have YouTube's captions.
 - **It observes, it does not patch.** A `PerformanceObserver` sees the player's own `/api/timedtext` request. Nothing replaces `XMLHttpRequest` or `fetch`. The script then fetches the same URL with `lang`/`tlang` changed. Every other parameter is kept, because timedtext answers an empty body to a URL without the player's `pot` token (verified 2026-10-14: same URL minus `pot` → 0 bytes).
 
-## Install (Chrome)
+## Install
 
-1. `chrome://extensions` → turn off **YouTube™ Dual Subtitles**, turn on **Tampermonkey**.
-2. Tampermonkey → **詳細資料** → turn on **允許使用者指令碼** (Chrome 138+ will not run userscripts without it).
-3. Tampermonkey dashboard → **+** (new script) → replace everything with `yt-dual-subs.user.js` → save.
-4. Open a video and turn on CC. The two-bar button at the left of the player's right-hand controls opens the settings.
+1. Install a userscript manager: [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/). In Chrome 138 and later, also turn on **Allow user scripts** on the manager's page in `chrome://extensions`.
+2. Open [yt-dual-subs.user.js](https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js) and accept the install. The manager checks for updates on its own.
+3. Turn off any other dual-subtitle extension, then open a video and turn on CC. The two-bar button beside the CC button opens the settings.
+
+Had a copy pasted in by hand before 0.5.0? Remove it: 0.5.0 has a new `@namespace`, so the manager installs it as a second script. Settings carry over.
 
 ## Settings
 
-The panel's labels are in Chinese when YouTube's interface is, English otherwise. Settings are kept in youtube.com's `localStorage` under `ytds-settings`.
+The menu looks like YouTube's own settings menu and follows its interface language: Chinese when YouTube's is, English otherwise. Arrow keys move through it and Escape goes back. Settings are kept in youtube.com's `localStorage` under `ytds-settings`.
 
 | Setting | Default | Range |
 |---|---|---|
 | On | on | off = YouTube's ordinary captions, no track switching |
-| Top language | the browser's (zh-TW → 繁體中文, zh-CN → 简体中文, else its primary subtag) | YouTube's translation languages for the video |
+| Top language | the browser's (zh-TW → 繁體中文, zh-CN → 简体中文, else its primary subtag) | YouTube's translation languages for the video; five common ones first, the rest in your interface language's order, with search |
 | Bottom language | original (auto) | original, or any translation language |
-| Box colour / opacity | `#080808` / 75% | any colour / 0–100% |
+| Box colour / opacity | `#080808` / 75% | five swatches or any colour / 0–100% in steps of 25 |
 | Gap | 0 px | 0–40 px |
 | Top / bottom size | 4.4% / 3.2% of the player height | 2–8% |
 
@@ -62,7 +69,8 @@ Debug with `window.__ytdsState` in the console and `[yt-dual-subs]` warnings. `p
 
 ```bash
 node --test test/core.test.mjs test/load.test.mjs
-uv run --python ~/.local/bin/python3 --with camoufox==0.4.11 --with playwright==1.59.0 test/e2e.py
+# e2e: Python 3 (run on 3.12); fetch camoufox's browser once first: uv run --with camoufox==0.4.11 python -m camoufox fetch
+uv run --with camoufox==0.4.11 --with playwright==1.59.0 test/e2e.py
 ```
 
 - `core.test.mjs` covers the plan (which track goes where, by setting), settings validation with garbage input, the URL rewrite, cue lookup (clock, newest-only, paired) and placement.
@@ -72,8 +80,8 @@ uv run --python ~/.local/bin/python3 --with camoufox==0.4.11 --with playwright==
   - pairing at the moments where it and the clock disagree
   - sizes, gap, boxes and centring
   - the asr case: one line at a time, never back, no leading punctuation, at most two vertical moves
-  - the settings panel: open it from the button, set box colour and gap and see them on screen, set Japanese on top and see kana, check the stored record, reset
-- The e2e saves screenshots (`panel.png` among them) to `~/workshop/outputs/yt-dual-subs/`. It exits `0` pass, `1` fail, `2` unverifiable (native captions never showed: bot check, ad, network). A `2` measured nothing, so it gets one retry with a fresh session.
+  - the settings menu: open it from the button, set box colour and gap and see them on screen, check the language page lists no language twice and the rest in order, set Japanese on top and see kana, check the stored record, reset
+- The e2e saves screenshots (the menu pages among them) to `test/shots/`, or to `$YTDS_SHOTS` if set. It exits `0` pass, `1` fail, `2` unverifiable (native captions never showed: bot check, ad, network). A `2` measured nothing, so it gets one retry with a fresh session.
 
 What e2e does **not** cover:
 - the Chromium engine and Tampermonkey's injector (it is Firefox via Camoufox)

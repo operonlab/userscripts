@@ -1,9 +1,16 @@
 // ==UserScript==
-// @name         YouTube Dual Subtitles (lite)
-// @namespace    workshop.lab.yt-dual-subs
-// @version      0.4.0
-// @description  雙語字幕：上方是你的語言（較大）、下方是原文（較小）；語言與樣式可在播放器按鈕調整；自動產生的字幕不再跳動。全部用 YouTube 自家字幕軌，不需任何 API。
-// @description:en  Dual YouTube captions: your language on top (larger), the original below (smaller); languages and style from a player button; auto-generated captions no longer jump. Uses YouTube's own caption tracks, no API.
+// @name         YouTube Dual Subtitles
+// @name:zh-TW   YouTube 雙語字幕
+// @namespace    https://github.com/operonlab/userscripts
+// @version      0.5.0
+// @description  Dual YouTube captions: your language on top (larger), the original below (smaller); languages and style from a player button; auto-generated captions no longer jump. Uses YouTube's own caption tracks, no API.
+// @description:zh-TW  雙語字幕：上方是你的語言（較大）、下方是原文（較小）；語言與樣式可在播放器按鈕調整；自動產生的字幕不再跳動。全部用 YouTube 自家字幕軌，不需任何 API。
+// @author       operonlab
+// @license      MIT
+// @homepageURL  https://github.com/operonlab/userscripts/tree/main/yt-dual-subs
+// @supportURL   https://github.com/operonlab/userscripts/issues
+// @updateURL    https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js
+// @downloadURL  https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js
 // @match        https://www.youtube.com/*
 // @run-at       document-start
 // @grant        none
@@ -834,6 +841,8 @@
   }
 
   function onMenuKey(e) {
+    // an input method choosing candidates (Zhuyin, Pinyin, kana) uses the arrows and Escape itself
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       if (page === 'main') closeMenu(true);
