@@ -26,6 +26,7 @@ function page({ tracks = null, readyAfter = 0, ignoreSwitch = false, userPicks =
   const switches = [];
   const handlers = {};
   let observe;
+  let observers = 0;
   const player = tracks && {
     getPlayerResponse: () => {
       if (asked++ < readyAfter) throw new Error('player not ready');
@@ -72,6 +73,7 @@ function page({ tracks = null, readyAfter = 0, ignoreSwitch = false, userPicks =
     PerformanceObserver: class {
       constructor(cb) {
         observe = cb;
+        observers++;
       }
       observe() {}
     },
@@ -91,6 +93,10 @@ function page({ tracks = null, readyAfter = 0, ignoreSwitch = false, userPicks =
     replan: () => sandbox.window.__ytdsState.replan(),
     store: (k, v) => sandbox.localStorage.setItem(k, v),
     goTo: (v) => Object.assign(loc, { href: `https://www.youtube.com/watch?v=${v}`, search: `?v=${v}` }),
+    // a second copy in the same page: the userscript and the store extension both installed
+    rerun: () => vm.runInNewContext(src, sandbox),
+    current: () => sandbox.window.__ytdsState,
+    observers: () => observers,
   };
 }
 
@@ -109,6 +115,18 @@ test('loads the translated track from the player request', async () => {
   await settle();
   assert.equal(p.state.status, 'ready');
   assert.equal(p.state.cues, 3);
+});
+
+test('a second copy in the same page stands down and the first keeps working', async () => {
+  const p = page();
+  const first = p.current();
+  p.rerun();
+  assert.equal(p.current(), first);
+  assert.equal(p.observers(), 1);
+  p.request(PLAYER('P1'));
+  await settle();
+  assert.equal(p.calls.length, 1);
+  assert.equal(p.state.status, 'loading');
 });
 
 test('its own requests do not start another load', async () => {

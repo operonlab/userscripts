@@ -196,6 +196,11 @@
     return;
   }
 
+  if (window.__ytdsState) {
+    // the userscript and the store extension can both be installed; two copies would draw two lines and two buttons
+    console.warn('[yt-dual-subs] another copy is already running on this page; this one stays off');
+    return;
+  }
   const state = { status: 'idle', key: '', plan: '', cues: 0, topUrl: '', paired: false };
   window.__ytdsState = state;
   Object.defineProperty(state, 'replan', { value: () => replan() }); // for the console and tests; not serialised
