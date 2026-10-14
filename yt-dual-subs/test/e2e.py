@@ -13,6 +13,13 @@ Native and line are always read in the same evaluate: the player restarts playba
 retries pot-less requests and shows ads on its own schedule, so comparing a native sample
 with a line sample taken seconds later measures the player, not the script.
 
+YTDS_ENGINE=chrome-ext (with YTDS_CHROME=<Chrome or Chromium executable>) runs the same checks
+on the store extension instead: scripts/build-extension.sh builds it into a temp folder and
+headless Chromium loads it unpacked, so the bytes measured are the bytes the zip holds. Chromium
+must not announce automation (--enable-automation sets navigator.webdriver, and YouTube then
+answers every caption request with an empty body). The transport check stays Camoufox-only:
+there the harness can wrap the script itself, here YouTube's own wrappers load in between.
+
 Exit: 0 pass
       1 fail — native captions were on screen and the Chinese line was wrong or missing
       2 unverifiable — native captions never showed (bot check, ad, network) or the
@@ -23,15 +30,20 @@ import json
 import os
 import re
 import statistics
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import parse_qs, urlparse
 
 from camoufox.sync_api import Camoufox
+from playwright.sync_api import sync_playwright
 
 SCRIPT = Path(__file__).resolve().parent.parent / "yt-dual-subs.user.js"
+BUILD = SCRIPT.parent.parent / "scripts" / "build-extension.sh"
+ENGINE = os.environ.get("YTDS_ENGINE", "camoufox")
 # (video, plan the script must choose, Chinese source it must fetch as (lang, tlang))
 VIDEOS = [
     # English, no Chinese track; in a zh-TW session the player often defaults to Japanese
@@ -53,6 +65,8 @@ TIGHT = 0.35  # largest gap between the lines, as a fraction of the Chinese font
 CENTER_TOLERANCE = 0.15  # largest distance between the two lines' centres, same unit
 ROLLUP_LINE = 1.6  # one native line, as a multiple of its font size (line height plus box padding)
 SHOTS = Path(os.environ.get("YTDS_SHOTS") or Path(__file__).resolve().parent / "shots")
+if ENGINE != "camoufox":
+    SHOTS = SHOTS / ENGINE
 SHOTS.mkdir(parents=True, exist_ok=True)
 
 LINE = """mw:(() => { const el = document.getElementById('ytds-line');
@@ -226,6 +240,32 @@ def sample_pairs(page, vid, enough):
     return native_seen, pairs
 
 
+# Failure output lists every timedtext request; YouTube clears the resource-timing buffer, an observer is not cleared.
+SEEN = (
+    "window.__ytdsSeen = [];"
+    "new PerformanceObserver(l => { for (const e of l.getEntries()) if (e.name.includes('/api/timedtext')) {"
+    " const p = new URL(e.name).searchParams;"
+    " window.__ytdsSeen.push([p.get('lang'), p.get('tlang'), p.has('pot') ? 'pot' : 'no-pot', e.decodedBodySize]); }"
+    "}).observe({ type: 'resource' });"
+)
+
+
+class MainWorld:
+    """A Chromium page whose evaluate takes the Camoufox-style mw: snippets.
+
+    Playwright's Chromium already evaluates in the page's main world; only the prefix differs.
+    """
+
+    def __init__(self, page):
+        self._page = page
+
+    def evaluate(self, expression, *args, **kwargs):
+        return self._page.evaluate(expression.removeprefix("mw:"), *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._page, name)
+
+
 def inject(route):
     resp = route.fetch()
     html = resp.text()
@@ -235,14 +275,7 @@ def inject(route):
         route.fulfill(response=resp)
         return
     # YouTube wraps fetch/XHR itself, so "is it native" says nothing; compare identity across our script instead.
-    # Failure output lists every timedtext request; YouTube clears the resource-timing buffer, an observer is not cleared.
-    before = (
-        "window.__ytdsBefore = [XMLHttpRequest.prototype.open, window.fetch]; window.__ytdsSeen = [];"
-        "new PerformanceObserver(l => { for (const e of l.getEntries()) if (e.name.includes('/api/timedtext')) {"
-        " const p = new URL(e.name).searchParams;"
-        " window.__ytdsSeen.push([p.get('lang'), p.get('tlang'), p.has('pot') ? 'pot' : 'no-pot', e.decodedBodySize]); }"
-        "}).observe({ type: 'resource' });"
-    )
+    before = "window.__ytdsBefore = [XMLHttpRequest.prototype.open, window.fetch];" + SEEN
     after = (
         "window.__ytdsTransportUntouched = XMLHttpRequest.prototype.open === window.__ytdsBefore[0]"
         " && window.fetch === window.__ytdsBefore[1];"
@@ -360,7 +393,10 @@ def check_panel(page, vid):
 
 def check_video(browser, vid, want_plan, want_source, check_cc_off, asr=False):
     page = browser.new_page()
-    page.route(re.compile(r"^https://www\.youtube\.com/watch\?"), inject)
+    if ENGINE == "camoufox":
+        page.route(re.compile(r"^https://www\.youtube\.com/watch\?"), inject)
+    else:
+        page = MainWorld(page)  # the extension puts the script in; the harness adds nothing
     timedtext = []  # bodies are read after sampling; reading inside the event handler can block the sync API
     page.on("response", lambda r: "/api/timedtext" in r.url and timedtext.append(r))
     navs = [time.time()]
@@ -374,8 +410,10 @@ def check_video(browser, vid, want_plan, want_source, check_cc_off, asr=False):
     page.wait_for_selector("#movie_player video", timeout=30000)
 
     if page.evaluate("mw:typeof window.__ytdsState") != "object":
-        done(2, f"{vid}: script not in the page (HTML had no nonce'd <script> to inject next to?)")
-    if page.evaluate("mw:window.__ytdsTransportUntouched") is not True:
+        if ENGINE == "camoufox":
+            done(2, f"{vid}: script not in the page (HTML had no nonce'd <script> to inject next to?)")
+        done(1, f"{vid}: the extension is loaded but its content script did not run on the watch page")
+    if ENGINE == "camoufox" and page.evaluate("mw:window.__ytdsTransportUntouched") is not True:
         done(1, f"{vid}: the script replaced XMLHttpRequest.prototype.open or fetch")
 
     wait_out_ads(page, vid)
@@ -540,13 +578,57 @@ def check_video(browser, vid, want_plan, want_source, check_cc_off, asr=False):
     page.close()
 
 
+def check_all(browser):
+    for i, (vid, want_plan, want_source) in enumerate(VIDEOS):
+        check_video(browser, vid, want_plan, want_source, check_cc_off=i == 0)
+    check_video(browser, *ASR_VIDEO, check_cc_off=False, asr=True)
+
+
+def run_chrome_extension():
+    chrome = os.environ.get("YTDS_CHROME")
+    if not chrome or not Path(chrome).is_file():
+        done(2, f"YTDS_CHROME must name a Chrome or Chromium executable, is {chrome!r}")
+    version = re.search(r"(\d+)\.\d", subprocess.run([chrome, "--version"], capture_output=True, text=True).stdout)
+    if not version:
+        done(2, f"could not read the version of {chrome}")
+    # the user agent of an ordinary Chrome of the same major version, without "HeadlessChrome"
+    ua = (f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+          f"Chrome/{version.group(1)}.0.0.0 Safari/537.36")
+    with tempfile.TemporaryDirectory() as tmp:
+        build = subprocess.run(["bash", str(BUILD), SCRIPT.parent.name, f"{tmp}/dist"], capture_output=True, text=True)
+        if build.returncode == 1:
+            done(1, f"the extension template disagrees with the userscript: {build.stdout.strip()}")
+        if build.returncode != 0:
+            done(2, f"the extension did not build: {build.stdout.strip()} {build.stderr.strip()}")
+        ext = f"{tmp}/dist/{SCRIPT.parent.name}"
+        with sync_playwright() as p:
+            ctx = p.chromium.launch_persistent_context(
+                f"{tmp}/profile",
+                executable_path=chrome,
+                headless=True,
+                locale="zh-TW",
+                user_agent=ua,
+                ignore_default_args=["--enable-automation"],
+                args=["--disable-blink-features=AutomationControlled", f"--disable-extensions-except={ext}",
+                      f"--load-extension={ext}", "--autoplay-policy=no-user-gesture-required", "--mute-audio"],
+            )
+            try:
+                ctx.add_init_script(SEEN)
+                check_all(ctx)
+            finally:
+                ctx.close()
+
+
 def main():
-    # os="macos": a spoofed non-mac fingerprint hides PingFang, and the screenshots show tofu
-    with Camoufox(headless=True, main_world_eval=True, locale="zh-TW", os="macos") as browser:
-        for i, (vid, want_plan, want_source) in enumerate(VIDEOS):
-            check_video(browser, vid, want_plan, want_source, check_cc_off=i == 0)
-        check_video(browser, *ASR_VIDEO, check_cc_off=False, asr=True)
-    done(0, "Chinese on top and larger, original below, on the right cue, for both Chinese sources")
+    if ENGINE == "chrome-ext":
+        run_chrome_extension()
+    elif ENGINE == "camoufox":
+        # os="macos": a spoofed non-mac fingerprint hides PingFang, and the screenshots show tofu
+        with Camoufox(headless=True, main_world_eval=True, locale="zh-TW", os="macos") as browser:
+            check_all(browser)
+    else:
+        done(2, f"YTDS_ENGINE {ENGINE!r} is neither camoufox nor chrome-ext")
+    done(0, f"[{ENGINE}] Chinese on top and larger, original below, on the right cue, for both Chinese sources")
 
 
 if __name__ == "__main__":

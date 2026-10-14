@@ -71,11 +71,13 @@ Debug with `window.__ytdsState` in the console and `[yt-dual-subs]` warnings. `p
 node --test test/core.test.mjs test/load.test.mjs
 # e2e: Python 3 (run on 3.12); fetch camoufox's browser once first: uv run --with camoufox==0.4.11 python -m camoufox fetch
 uv run --with camoufox==0.4.11 --with playwright==1.59.0 test/e2e.py
+# the same checks on the store extension in Chromium (any Chrome or Chromium executable)
+YTDS_ENGINE=chrome-ext YTDS_CHROME=/path/to/chrome uv run --with camoufox==0.4.11 --with playwright==1.59.0 test/e2e.py
 ```
 
 - `core.test.mjs` covers the plan (which track goes where, by setting), settings validation with garbage input, the URL rewrite, cue lookup (clock, newest-only, paired) and placement.
 - `load.test.mjs` runs the loader in a fake page where fetch answers on cue. It covers retries, stale responses after navigation, a late track list, switching once with a dropped or hand-overridden switch, asr track objects, translated bottom lines, stored settings, and Chinese videos.
-- `e2e.py` runs three live cases in headless Camoufox: Rick Astley (machine translation), a TED talk (human zh-TW track), and Rick Astley on its auto-generated English track. The script is injected into the watch page's HTML with the page's own CSP nonce, so it runs in the main world before any YouTube script, under the real CSP. The e2e checks:
+- `e2e.py` runs three live cases, in headless Camoufox by default or, with `YTDS_ENGINE=chrome-ext`, on the store extension in headless Chromium (built by `scripts/build-extension.sh` into a temp folder and loaded unpacked, so the bytes measured are the bytes the zip holds). The cases: Rick Astley (machine translation), a TED talk (human zh-TW track), and Rick Astley on its auto-generated English track. The script is injected into the watch page's HTML with the page's own CSP nonce, so it runs in the main world before any YouTube script, under the real CSP. The e2e checks:
   - each line is the right cue for its moment, against tracks the harness parses itself
   - pairing at the moments where it and the clock disagree
   - sizes, gap, boxes and centring
@@ -84,9 +86,9 @@ uv run --with camoufox==0.4.11 --with playwright==1.59.0 test/e2e.py
 - The e2e saves screenshots (the menu pages among them) to `test/shots/`, or to `$YTDS_SHOTS` if set. It exits `0` pass, `1` fail, `2` unverifiable (native captions never showed: bot check, ad, network). A `2` measured nothing, so it gets one retry with a fresh session.
 
 What e2e does **not** cover:
-- the Chromium engine and Tampermonkey's injector (it is Firefox via Camoufox)
+- Tampermonkey's own injector (Camoufox mode injects the script into the HTML the way it does; chrome-ext mode measures the extension)
 - a Chinese video
 - SPA navigation between videos
 - a second page load reading the stored settings: YouTube's service worker serves later page loads past the harness's injection; the load tests cover reading them
 
-Headless Chromium is refused captions outright (every timedtext body is empty), so the Chrome + Tampermonkey path is only verified by installing it and watching a video.
+Chromium must not announce automation: with Playwright's default `--enable-automation`, `navigator.webdriver` is true and YouTube answers every caption request, the player's own included, with an empty body. The harness drops that flag.

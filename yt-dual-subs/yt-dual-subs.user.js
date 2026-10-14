@@ -2,7 +2,7 @@
 // @name         YouTube Dual Subtitles
 // @name:zh-TW   YouTube 雙語字幕
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.5.0
+// @version      0.5.1
 // @description  Dual YouTube captions: your language on top (larger), the original below (smaller); languages and style from a player button; auto-generated captions no longer jump. Uses YouTube's own caption tracks, no API.
 // @description:zh-TW  雙語字幕：上方是你的語言（較大）、下方是原文（較小）；語言與樣式可在播放器按鈕調整；自動產生的字幕不再跳動。全部用 YouTube 自家字幕軌，不需任何 API。
 // @author       operonlab
