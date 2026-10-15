@@ -15,7 +15,7 @@ Everything the developer dashboard asks for, in the order it asks. Upload `dist/
 - **Homepage URL**: https://github.com/operonlab/userscripts/tree/main/yt-dual-subs
 - **Support URL**: https://github.com/operonlab/userscripts/issues
 - **Mature content**: No
-- **Graphic assets** (in `store/`): icon is in the zip (`icons/128.png`); `screenshot-*.png` 1280×800; `promo-small.png` 440×280.
+- **Graphic assets**: the store icon is a separate upload, `extension/icons/128.png` (96×96 artwork on a transparent 128 canvas); from `store/`, `screenshot-*.png` 1280×800 under the global screenshots, `promo-small.png` 440×280.
 
 ### Description: English
 
@@ -92,6 +92,18 @@ Not affiliated with or endorsed by YouTube or Google.
 ## Distribution
 
 - Free · Public · all regions.
+
+## Test instructions
+
+No credentials. Under "Additional instructions" (500 characters max):
+
+```
+No account or setup is needed.
+1. Open https://www.youtube.com/watch?v=iG9CE55wbtY and turn on captions (CC).
+2. Click the "Dual subtitles" button next to CC, open "Top language" and pick any language other than English, e.g. Spanish.
+3. Two lines appear: Spanish on top, the original English right below.
+In a browser whose UI language is not English, step 2 is not needed. The extension makes no requests except to youtube.com.
+```
 
 ## Account (once, by the account owner)
 
