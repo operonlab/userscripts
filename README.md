@@ -6,7 +6,7 @@ You need a userscript manager: [Tampermonkey](https://www.tampermonkey.net/) or 
 
 | Script | What it does | |
 |---|---|---|
-| [YouTube Dual Subtitles](yt-dual-subs/) | Two caption lines on YouTube: your language on top, the original below, styled like the player's own captions. | [Install](https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js) |
+| [YouTube Dual Subtitles](yt-dual-subs/) | Two caption lines on YouTube: your language on top, the original below, styled like the player's own captions. | [Install](https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js) · [Chrome Web Store](https://chromewebstore.google.com/detail/dual-subs/iglkfnajleldidbmkgblfnkigfaeigcn) |
 
 In Chrome 138 and later, Tampermonkey runs scripts only after you turn on **Allow user scripts** on its page in `chrome://extensions`.
 

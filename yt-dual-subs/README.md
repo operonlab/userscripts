@@ -21,6 +21,8 @@ It was written to replace a closed-source dual-subtitle extension that hides You
 2. Open [yt-dual-subs.user.js](https://raw.githubusercontent.com/operonlab/userscripts/main/yt-dual-subs/yt-dual-subs.user.js) and accept the install. The manager checks for updates on its own.
 3. Turn off any other dual-subtitle extension, then open a video and turn on CC. The two-bar button beside the CC button opens the settings.
 
+Rather not install a userscript manager? In Chrome, add [Dual Subs from the Chrome Web Store](https://chromewebstore.google.com/detail/dual-subs/iglkfnajleldidbmkgblfnkigfaeigcn) instead. It is built from the same script, and its updates arrive after each store review.
+
 Had a copy pasted in by hand before 0.5.0? Remove it: 0.5.0 has a new `@namespace`, so the manager installs it as a second script. Settings carry over.
 
 ## Settings
