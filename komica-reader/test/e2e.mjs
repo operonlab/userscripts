@@ -161,6 +161,16 @@ try {
 
   await frame.press('#fcom', 'Escape');
   check('drawer: Esc in the text box folds the form, drawer stays', (await frame.evaluate(() => document.getElementById('postform_main').dataset.krState)) === 'collapsed' && (await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open'))));
+  // leave the thread inside the drawer, then ask for the same thread again: it must load again
+  await frame.goto(BOARD, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  const left = await page
+    .waitForFunction((t) => !document.querySelector('.kr-drawer-title').textContent.includes(`No.${t}`), target, { timeout: 20000 })
+    .then(() => true, () => false);
+  await page.click(`.kr-side-open[data-res="${target}"]`);
+  const back = await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 }).then(() => true, () => false);
+  check('drawer: after browsing off the thread inside it, opening that thread again reloads it', left && back, JSON.stringify({ left, back, url: frame.url() }));
+  await frame.waitForSelector('#postform_main.kr-composer.kr-reply', { timeout: 20000 }).catch(() => null);
+
   await frame.press('body', 'Escape');
   await page.waitForTimeout(200);
   check('drawer: Esc again closes the drawer', !(await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open'))));

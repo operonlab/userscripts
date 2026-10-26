@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, opaqueColor, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -72,6 +72,17 @@ test('no saved width means 45% of the window', () => {
 
 test('a narrow window never gets a drawer below its minimum', () => {
   assert.equal(clampWidth(600, 500), MIN_W);
+});
+
+test('while a thread is loading, a late ready from the previous page is ignored', () => {
+  assert.equal(readyAccepted(200, 100), false); // opened A, then B quickly: A answers late
+  assert.equal(readyAccepted(200, null), false); // a board page answering while B loads
+  assert.equal(readyAccepted(200, 200), true);
+});
+
+test('with nothing loading, wherever the reader went inside the drawer is accepted', () => {
+  assert.equal(readyAccepted(null, 300), true); // followed a link to another thread
+  assert.equal(readyAccepted(null, null), true); // went to the board inside the drawer
 });
 
 test('the drawer takes the first solid background, skipping transparent ones', () => {

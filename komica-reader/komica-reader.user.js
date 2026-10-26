@@ -58,6 +58,12 @@
     return Math.round(Math.min(Math.max(w, MIN_W), max));
   }
 
+  // while the drawer waits for thread `loading`, a `ready` from any other page is the previous one,
+  // late; with nothing pending, any page the reader navigated to inside the drawer is accepted
+  function readyAccepted(loading, res) {
+    return loading === null || res === loading;
+  }
+
   // first non-transparent `rgb()/rgba()` among computed backgrounds, so the drawer matches the site theme
   function opaqueColor(colors, fallback) {
     for (const c of colors) {
@@ -70,7 +76,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -300,7 +306,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     drawer.append(resize, head, frame);
     document.body.appendChild(drawer);
 
-    const d = (state.drawer = { el: drawer, frame, title, newtab, res: null, ready: false, pending: [] });
+    const d = (state.drawer = { el: drawer, frame, title, newtab, res: null, loading: null, ready: false, pending: [] });
 
     let width = null;
     try {
@@ -320,10 +326,10 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
         width = window.innerWidth - ev.clientX;
         applyWidth();
       };
+      // lostpointercapture follows pointerup and pointercancel alike
       const up = () => {
         root.classList.remove('kr-resizing');
         resize.removeEventListener('pointermove', move);
-        resize.removeEventListener('pointerup', up);
         width = clampWidth(width, window.innerWidth);
         try {
           localStorage.setItem(WIDTH_KEY, String(width));
@@ -332,7 +338,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
         }
       };
       resize.addEventListener('pointermove', move);
-      resize.addEventListener('pointerup', up);
+      resize.addEventListener('lostpointercapture', up, { once: true });
     });
 
     close.addEventListener('click', closeDrawer);
@@ -345,16 +351,52 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       }
     });
 
+    const markReady = () => {
+      d.loading = null;
+      d.ready = true;
+      for (const msg of d.pending.splice(0)) frame.contentWindow.postMessage(msg, location.origin);
+    };
+
     window.addEventListener('message', (e) => {
       if (e.origin !== location.origin || e.source !== frame.contentWindow || !e.data || typeof e.data.kr !== 'string') return;
       if (e.data.kr === 'ready') {
-        d.ready = true;
-        if (/^\d+$/.test(String(e.data.res || ''))) setThread(Number(e.data.res), e.data.title);
-        for (const msg of d.pending.splice(0)) frame.contentWindow.postMessage(msg, location.origin);
+        const res = /^\d+$/.test(String(e.data.res || '')) ? Number(e.data.res) : null;
+        if (!readyAccepted(d.loading, res)) return;
+        if (res) setThread(res, e.data.title);
+        else leaveThread(e.data.title, e.data.href);
+        markReady();
       } else if (e.data.kr === 'close') {
         closeDrawer();
       }
     });
+
+    // the requested page loaded but never said ready (an error page, say): stop waiting for it
+    frame.addEventListener('load', () => {
+      if (d.loading === null) return;
+      let href = '';
+      try {
+        href = frame.contentWindow.location.href;
+      } catch {
+        return;
+      }
+      if (threadLink(href, location.href)?.res === d.loading) markReady();
+    });
+  }
+
+  // the drawer moved off a thread (to the board, a module page): forget the thread so opening it reloads
+  function leaveThread(titleText, href) {
+    const d = state.drawer;
+    d.res = null;
+    d.title.textContent = String(titleText || '').trim() || '討論串以外的頁面';
+    let same = null;
+    try {
+      same = new URL(String(href || ''), location.href);
+    } catch {
+      same = null;
+    }
+    if (same && same.origin === location.origin) d.newtab.href = same.href;
+    else d.newtab.removeAttribute('href');
+    for (const n of document.querySelectorAll('#threads .thread.kr-active')) n.classList.remove('kr-active');
   }
 
   function setThread(res, titleText) {
@@ -378,6 +420,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     const d = state.drawer;
     if (!d) return;
     if (d.res !== res) {
+      d.loading = res;
       d.ready = false;
       d.pending = [];
       d.frame.src = `pixmicat.php?res=${res}`;
@@ -396,6 +439,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     // blank the frame so a playing video in it stops
     d.frame.src = 'about:blank';
     d.res = null;
+    d.loading = null;
     d.ready = false;
     d.pending = [];
   }
@@ -445,9 +489,9 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
   }
 
   function initEmbed() {
-    // a board page opened inside the drawer has no resto: the drawer keeps its last title
+    // a board or module page opened inside the drawer has no resto
     const res = composer.resto;
-    const title = res ? document.querySelector('#threads .threadpost .title')?.textContent || '' : '';
+    const title = res ? document.querySelector('#threads .threadpost .title')?.textContent || '' : document.title;
     window.addEventListener('message', (e) => {
       if (e.origin !== location.origin || e.source !== window.parent || !e.data) return;
       if (e.data.kr === 'quote' && /^\d+$/.test(String(e.data.no))) {
@@ -457,7 +501,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
         flashPost(Number(e.data.post));
       }
     });
-    window.parent.postMessage({ kr: 'ready', res, title }, location.origin);
+    window.parent.postMessage({ kr: 'ready', res, title, href: location.href }, location.origin);
   }
 
   function onKey(e) {
