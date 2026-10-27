@@ -137,12 +137,15 @@ try {
   }));
   const before = await layout();
   check('pane: no thread open, no pane — the list has the whole width', before.pane === 'none' && before.bodyRight === '0px', JSON.stringify(before));
-  // a row the pointer rests on is not fetched ahead: that cost the board's server a thread page for every row crossed
-  const restOn = list.at(-1)?.res;
+  // a row the pointer rests on is not fetched ahead: that cost the board's server a thread page for every row crossed.
+  // No thread is open yet, so no thread page may be asked for at all (the row that ends up under the pointer need not
+  // be the one aimed at); the second row is in view without scrolling
+  const restOn = (list[1] || list[0])?.res;
   const restFetches = [];
-  const onRequest = (q) => { if (new RegExp(`[?&]res=${restOn}(?!\\d)`).test(q.url())) restFetches.push(q.url()); };
+  const onRequest = (q) => { if (/[?&]res=\d+/.test(q.url())) restFetches.push(q.url()); };
   page.on('request', onRequest);
-  await page.locator(`#threads .thread[data-no="${restOn}"]`).hover();
+  // on the row's own padding, clear of its links (a >>No. there would bring up the site's popup)
+  await page.locator(`#threads .thread[data-no="${restOn}"]`).hover({ position: { x: 6, y: 6 } });
   const rested = await page.evaluate((no) => document.querySelector(`#threads .thread[data-no="${no}"]`).matches(':hover'), restOn);
   await page.waitForTimeout(800);
   page.off('request', onRequest);
