@@ -449,13 +449,21 @@ try {
       return a ? { href: a.getAttribute('href'), tag: a.closest('.kr-side-row').querySelector('.kr-side-tag')?.textContent || null } : null;
     });
     check('portal: a board that moved links to its new address, untagged', movedRow?.href === 'https://2cat.uk/' && movedRow.tag === null, JSON.stringify(movedRow));
-    await menu.locator('.kr-side-row a[href="https://gaia.komica1.org/00b/index.htm"]').first().click();
+    // a board in the portal's old-style frame is from another address, and the frame cannot let it go fullscreen (its
+    // videos' button stays grey): put there, it says so; the sidebar opens boards as the page instead
     const cont = page.frame({ name: 'cont' });
-    await cont.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 });
-    await cont.waitForSelector('html.kr-md', { timeout: 20000 });
-    check('portal: 綜合 opens in cont with list and pane, no second sidebar', await cont.evaluate(() => document.documentElement.classList.contains('kr-md') && !!document.querySelector('.kr-pane') && !document.querySelector('.kr-side')));
-    await page.waitForTimeout(1500);
+    await cont.goto(BOARD, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+    await cont.waitForSelector('html.kr-md', { timeout: 20000 }).catch(() => null);
+    const inCont = await cont.evaluate(() => ({ fullscreen: document.fullscreenEnabled, notice: document.querySelector('.kr-framed')?.textContent || null, target: document.querySelector('.kr-framed')?.target, side: !!document.querySelector('.kr-side') })).catch((e) => ({ error: e.message }));
+    check('portal: 綜合 in the portal\'s frame says its videos cannot go fullscreen there, and opens as the page', inCont.fullscreen === false && /不能全螢幕/.test(inCont.notice || '') && inCont.target === '_top' && !inCont.side, JSON.stringify(inCont));
     await shot(page, '8-portal.png');
+    const link = menu.isDetached() ? null : menu.locator('.kr-side-row a[href="https://gaia.komica1.org/00b/index.htm"]').first();
+    const linkTarget = link && await link.getAttribute('target');
+    if (link) await link.click();
+    await page.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 }).catch(() => null);
+    await page.waitForSelector('html.kr-md .kr-pane', { timeout: 20000 }).catch(() => null);
+    const asPage = await page.evaluate(() => ({ url: location.href, top: window.top === window, side: !!document.querySelector('.kr-side'), fullscreen: document.fullscreenEnabled, notice: !!document.querySelector('.kr-framed') })).catch((e) => ({ error: e.message }));
+    check('portal: the sidebar opens 綜合 as the page, with its own sidebar, where videos can go fullscreen', linkTarget === '_top' && asPage.top && asPage.url.startsWith('https://gaia.komica1.org/00b/') && asPage.side && asPage.fullscreen === true && !asPage.notice, JSON.stringify({ linkTarget, ...asPage }));
   }
 
   // the site's own thread page in dark mode: its posts must not stay beige under the reader's white text
@@ -1014,11 +1022,16 @@ try {
   const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW' });
   await fctx.addInitScript(wrapped);
   await fctx.route(/post_vote\.php/, (r) => (r.request().method() === 'POST' ? r.abort() : r.continue()));
-  // stand-in top pages: one on another site, one on 綜合's own site; ?src= is the page they frame
-  await fctx.route(/^https:\/\/(kr-frame-test\.example|kr-test\.komica1\.org)\/\?src=/, (r) => r.fulfill({ contentType: 'text/html',
-    body: `<!doctype html><iframe src="${new URL(r.request().url()).searchParams.get('src')}" style="border:0;width:100%;height:860px"></iframe>` }));
-  const framedIn = async (page, top, src, ready = '.kr-toolbar') => {
-    await page.goto(`${top}?src=${encodeURIComponent(src)}`, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  // the site asks for its vote cookie only while voting is open: open here, whatever the live switch says
+  await fctx.route(/vote_status\.json/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"paused":false}' }));
+  // stand-in top pages: one on another site, one on 綜合's own site; ?src= is the page they frame, &fs gives the frame
+  // leave to go fullscreen
+  await fctx.route(/^https:\/\/(kr-frame-test\.example|kr-test\.komica1\.org)\/\?src=/, (r) => {
+    const q = new URL(r.request().url()).searchParams;
+    return r.fulfill({ contentType: 'text/html', body: `<!doctype html><iframe src="${q.get('src')}"${q.has('fs') ? ' allowfullscreen' : ''} style="border:0;width:100%;height:860px"></iframe>` });
+  });
+  const framedIn = async (page, top, src, ready = '.kr-toolbar', fs = false) => {
+    await page.goto(`${top}?src=${encodeURIComponent(src)}${fs ? '&fs' : ''}`, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
     for (let i = 0; i < 40; i++) {
       const f = page.frames().find((x) => x.url().startsWith('https://gaia.komica1.org/00b/'));
       if (f && await f.evaluate((sel) => !!document.querySelector(sel), ready).catch(() => false)) return f;
@@ -1034,8 +1047,16 @@ try {
       const t = [...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank').map((a) => a.target);
       return { notice: n?.textContent || null, href: n?.getAttribute('href'), target: n?.getAttribute('target'), shown: !!n && n.getBoundingClientRect().height > 0, links: t.length, top: t.filter((x) => x === '_top').length };
     });
-    const cookies = (await fctx.cookies('https://gaia.komica1.org/00b/')).map((c) => c.name);
-    check('framed by another site: the browser keeps the site\'s vote cookie from it (what the notice is for)', !cookies.includes('komica_vote_token'), JSON.stringify(cookies));
+    // a cookie of the kind the site's vote cookie is (SameSite=Lax), set here by the test: the site sends its own only
+    // while voting is open, so it cannot be the measure
+    const laxKept = (f) => f.evaluate(() => {
+      document.cookie = 'kr_probe=1; Secure; SameSite=Lax; path=/';
+      const kept = document.cookie.includes('kr_probe=1');
+      document.cookie = 'kr_probe=; Secure; SameSite=Lax; path=/; max-age=0';
+      return kept;
+    }).catch(() => null);
+    const framedLax = await laxKept(ff);
+    check('framed by another site: the browser keeps a cookie like the site\'s vote cookie from it (what the notice is for)', framedLax === false, JSON.stringify({ framedLax }));
     check('framed by another site: a notice says votes do nothing here, and opens the board as the page', framed.shown && /投票不會生效/.test(framed.notice) && framed.target === '_top' && !!framed.href?.startsWith('https://gaia.komica1.org/00b/'), JSON.stringify(framed));
     check('framed by another site: the sidebar\'s boards open as the page, not in the frame', framed.links > 0 && framed.top === framed.links, JSON.stringify({ links: framed.links, top: framed.top }));
     if (framed.shown) await ff.locator('.kr-framed').click();
@@ -1044,11 +1065,11 @@ try {
     await fp.waitForTimeout(3000);
     const after = {
       url: fp.url(),
-      cookies: (await fctx.cookies('https://gaia.komica1.org/00b/')).map((c) => c.name),
+      lax: await laxKept(fp.mainFrame()),
       notice: await fp.evaluate(() => !!document.querySelector('.kr-framed')).catch(() => null),
       targets: await fp.evaluate(() => [...new Set([...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank').map((a) => a.target))]).catch(() => null),
     };
-    check('opened as the page: no notice, the site\'s vote cookie is kept, and board links open in place', after.url.startsWith('https://gaia.komica1.org/00b/') && after.cookies.includes('komica_vote_token') && after.notice === false && JSON.stringify(after.targets) === '["_self"]', JSON.stringify(after));
+    check('opened as the page: no notice, cookies like the site\'s vote cookie are kept, and board links open in place', after.url.startsWith('https://gaia.komica1.org/00b/') && after.lax === true && after.notice === false && JSON.stringify(after.targets) === '["_self"]', JSON.stringify(after));
 
     // a thread page framed by another site says so too
     const res = await fp.evaluate(() => document.querySelector('#threads .thread')?.dataset.no).catch(() => null);
@@ -1056,16 +1077,23 @@ try {
     const tnote = tf && await tf.evaluate(() => { const n = document.querySelector('.kr-framed'); return n ? { shown: n.getBoundingClientRect().height > 0, target: n.target } : null; });
     check('framed by another site: a thread page says so as well', !!tnote?.shown && tnote.target === '_top', JSON.stringify({ res, tnote }));
 
-    // framed by 綜合's own site (as the komica1.org portal does): cookies are kept there, so no notice; its own boards
-    // stay in the frame and only other sites' open as the page
-    const sf = await framedIn(fp, 'https://kr-test.komica1.org/', BOARD);
+    // framed by 綜合's own site, the frame letting it go fullscreen: cookies are kept and videos can, so no notice; its
+    // own boards stay in the frame and only other sites' open as the page
+    const sf = await framedIn(fp, 'https://kr-test.komica1.org/', BOARD, '.kr-toolbar', true);
     const same = sf && await sf.evaluate(() => {
       const links = [...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank');
       const own = links.filter((a) => a.hostname.endsWith('komica1.org'));
       const other = links.filter((a) => !a.hostname.endsWith('komica1.org'));
-      return { notice: !!document.querySelector('.kr-framed'), own: own.length, ownSelf: own.filter((a) => a.target === '_self').length, other: other.length, otherTop: other.filter((a) => a.target === '_top').length };
+      return { notice: !!document.querySelector('.kr-framed'), fullscreen: document.fullscreenEnabled, own: own.length, ownSelf: own.filter((a) => a.target === '_self').length, other: other.length, otherTop: other.filter((a) => a.target === '_top').length };
     });
-    check('framed by 綜合\'s own site: no notice; its boards stay in the frame, other sites\' open as the page', !!same && !same.notice && same.own > 0 && same.ownSelf === same.own && same.other > 0 && same.otherTop === same.other, JSON.stringify(same));
+    check('framed by 綜合\'s own site: no notice; its boards stay in the frame, other sites\' open as the page', !!same && !same.notice && same.fullscreen && same.own > 0 && same.ownSelf === same.own && same.other > 0 && same.otherTop === same.other, JSON.stringify(same));
+    // the same frame without that leave (like the portal's old-style one): votes are fine there, fullscreen is not
+    const nf = await framedIn(fp, 'https://kr-test.komica1.org/', BOARD);
+    const noFull = nf && await nf.evaluate(() => ({ fullscreen: document.fullscreenEnabled, notice: document.querySelector('.kr-framed')?.textContent || null }));
+    check('framed by 綜合\'s own site with no leave to go fullscreen: the notice says videos cannot, not votes', !!noFull && noFull.fullscreen === false && /不能全螢幕/.test(noFull.notice || '') && !/投票/.test(noFull.notice || ''), JSON.stringify(noFull));
+    const tnf = res && await framedIn(fp, 'https://kr-test.komica1.org/', `https://gaia.komica1.org/00b/pixmicat.php?res=${res}`, 'html.kr-thread');
+    const tfull = tnf && await tnf.evaluate(() => document.querySelector('.kr-framed')?.textContent || null);
+    check('framed with no leave to go fullscreen: a thread page says so as well', /不能全螢幕/.test(tfull || ''), JSON.stringify({ res, tfull }));
   } else {
     check('framed by another site: the board loaded in the frame with the reader', false);
   }

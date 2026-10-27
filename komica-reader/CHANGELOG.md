@@ -3,6 +3,10 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.5 — 2026-10-27
+
+- **Videos go fullscreen again from the komica1.org portal.** The portal shows boards in an old-style frame, and the browser lets nothing from another address inside it go fullscreen: every video's button was grey (on the plain site too). The portal's sidebar now opens a board as the page itself, with the reader's own sidebar. A board or thread found in a frame that cannot let it go fullscreen says so at the top, with a link that opens it as the page.
+
 ## 0.6.4 — 2026-10-27
 
 - **No more flash of the old page between pages.** The reader can lay a page out only once the whole of it has arrived, and until then the browser showed the site's page half laid out, the old look, for a moment on every page change and more on a slow line. Now the reader's frame comes first: on a board the sidebar, a bar with the board's name and a spinner, and the list replaces the spinner when it is ready; on a thread page the bar and the spinner.

@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.4
+// @version      0.6.5
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -967,7 +967,11 @@ html.kr-portal .kr-side { border-right: 0; }
     const row = (board) => {
       const node = el('div', { class: `kr-side-row${board.s === 'down' ? ' kr-side-down' : ''}` });
       // a board on another site than the page this one is framed in opens as the page itself, its cookies working
-      const link = el('a', { href: board.u, target: board.c === '外部連結' ? '_blank' : portal ? 'cont' : framedElsewhere(board.u) ? '_top' : '_self' }, board.l);
+      // the portal's board frame is an old-style <frame>, which can give a board from another address no leave to go
+      // fullscreen (its videos' button stays grey): from the portal such a board opens as the page, with its own
+      // sidebar; the portal's own pages stay in its frame
+      const elsewhere = portal ? new URL(board.u, location.href).hostname !== location.hostname : framedElsewhere(board.u);
+      const link = el('a', { href: board.u, target: board.c === '外部連結' ? '_blank' : elsewhere ? '_top' : portal ? 'cont' : '_self' }, board.l);
       if (board.c === '外部連結') link.rel = 'noopener';
       if (board.s === 'down') {
         link.title = `上次檢查 ${BOARDS_AT} 連不上`;
@@ -2528,10 +2532,17 @@ html.kr-portal .kr-side { border-right: 0; }
       document.querySelector('.kr-side-open')?.remove();
       root.style.removeProperty('--kr-side');
     }
-    // 綜合 (the board with votes) inside another site's frame: its votes come to nothing there, so say so and offer the
-    // page itself. The portal's own frame is the same site, and its board frame stays put.
-    if (location.hostname === 'gaia.komica1.org' && window.name !== 'cont' && framedElsewhere()) {
-      const notice = el('a', { class: 'kr-framed', href: location.href, target: '_top' }, `這一版開在 ${topHost} 的框架裡，瀏覽器擋掉站方的 cookie，投票不會生效 · 整頁開啟`);
+    // A board or thread in a frame loses what the browser keeps from frames: inside another site's, 綜合's votes (its
+    // cookies are withheld); inside one from another address with no leave to (the portal's old-style frame, which
+    // cannot give it), videos going fullscreen. Say which, and offer the page itself.
+    const framedWhy = location.hostname === 'gaia.komica1.org' && window.name !== 'cont' && framedElsewhere()
+      ? `這一版開在 ${topHost} 的框架裡，瀏覽器擋掉站方的 cookie，投票不會生效`
+      // (false, not merely absent: an iPhone has no such switch and takes a video fullscreen its own way)
+      : window.top !== window && document.fullscreenEnabled === false && (composer.resto || document.getElementById('threads'))
+        ? '這一版開在框架裡，影片不能全螢幕'
+        : '';
+    if (framedWhy) {
+      const notice = el('a', { class: 'kr-framed', href: location.href, target: '_top' }, `${framedWhy} · 整頁開啟`);
       const bar = document.querySelector('.kr-toolbar');
       if (bar) bar.after(notice);
       else document.body.prepend(notice);
