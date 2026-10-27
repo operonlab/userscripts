@@ -963,7 +963,7 @@ html.kr-portal .kr-side { border-right: 0; }
   // sending: what was sent, to where, and the newest post number known then; the verdict reads that, not the form as it is now
   // unsure: the last send that ended in 看不出, whose result page may still turn up late
   // touched: the reader has written in the form on this page (text the browser restores on reload is not a draft)
-  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, sending: null, unsure: null, timer: null, touched: false, category: '' };
+  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, sending: null, unsure: null, touched: false, category: '' };
 
   function setupComposer() {
     const form = document.getElementById('postform_main');
@@ -1002,11 +1002,14 @@ html.kr-portal .kr-side { border-right: 0; }
         const sending = { mode: composer.mode, target: composer.target, text: document.getElementById('fcom')?.value || '', subject: document.getElementById('fsub')?.value || '', after: Math.max(0, ...known) };
         // the newest post when it was sent, not when the page loaded: replies since then are other people's. If ours
         // lands before this answers, it counts as known and the verdict is 看不出 — the safe side
-        sending.baseline = sending.mode === 'reply' && sending.target ? loadThread(sending.target, true).then((posts) => Math.max(0, ...posts.map((p) => p.no)), () => 0) : Promise.resolve(0);
+        // without that number nothing can be confirmed (Infinity), rather than falling back to the page's older one
+        sending.baseline = sending.mode === 'reply' && sending.target ? loadThread(sending.target, true).then((posts) => Math.max(0, ...posts.map((p) => p.no)), () => Infinity) : Promise.resolve(0);
         composer.sending = sending;
         composer.unsure = null;
+        // what was sent is a draft from now on, even text the browser restored
+        composer.touched = true;
         setStatus('送出中⋯');
-        waitForResult(60000, '等不到回應頁');
+        waitForResult(sending, 60000, '等不到回應頁');
       });
       sink.addEventListener('load', () => onPosted(sink));
       for (const type of ['input', 'change']) form.addEventListener(type, () => (composer.touched = true));
@@ -1030,10 +1033,10 @@ html.kr-portal .kr-side { border-right: 0; }
     }
   }
 
-  function waitForResult(ms, message) {
-    clearTimeout(composer.timer);
-    const sending = composer.sending;
-    composer.timer = setTimeout(() => composer.sending === sending && settle(sending, { kind: 'unknown', message }, null), ms);
+  // each send keeps its own timer: a late page for an older send must not cancel the wait of the one in flight
+  function waitForResult(sending, ms, message) {
+    clearTimeout(sending.timer);
+    sending.timer = setTimeout(() => settle(sending, { kind: 'unknown', message }, null), ms);
   }
 
   function onPosted(sink) {
@@ -1053,7 +1056,7 @@ html.kr-portal .kr-side { border-right: 0; }
       text: doc?.body?.innerText || '',
     });
     // a redirect that never arrives ends the wait too
-    if (outcome.kind === 'wait') waitForResult(15000, '回應頁停在轉址');
+    if (outcome.kind === 'wait') waitForResult(sending, 15000, '回應頁停在轉址');
     else settle(sending, outcome, doc);
   }
 
@@ -1061,22 +1064,24 @@ html.kr-portal .kr-side { border-right: 0; }
 
   // the text is cleared only when the post itself is found: on the page it landed on, or in the refetched thread
   async function settle(sending, outcome, doc) {
+    if (sending.done) return;
+    clearTimeout(sending.timer);
     if (composer.sending === sending) {
-      clearTimeout(composer.timer);
       composer.sending = null;
       // only for the send in hand: a late answer must not drop the token of the next post being written
       resetTurnstile();
     }
+    // until there is a verdict, a result page that turns up late is still read
+    composer.unsure = sending;
     const unsure = (why) => {
-      composer.unsure = sending;
-      // a newer post on its way has the status line now
-      if (composer.sending) return;
+      // a newer post on its way has the status line now; a verdict already reached stands
+      if (sending.done || composer.sending) return;
       setStatus(`看不出有沒有送出（${why}）。內容還在框裡，請按 ↻ 或在新分頁確認。`, true);
     };
     const probe = postedProbe(sending.text);
     // an image or quotes alone leave nothing to tell this post from anyone else's
     if (!probe) return unsure(outcome.message || '只有圖或引用，認不出是哪一則');
-    const look = { probe, after: Math.max(sending.after, await within(sending.baseline, 10000).catch(() => 0)) };
+    const look = { probe, after: Math.max(sending.after, await within(sending.baseline, 10000).catch(() => Infinity)) };
     const textOf = (thread) => readPosts(thread).map((p) => ({ no: p.no, op: p.op, text: p.quote?.textContent || '' }));
     const landed = outcome.kind === 'ok' ? doc.getElementById('threads') : null;
     if (landed && site.kind === 'pixmicat') wrapThreads(landed);
@@ -1098,6 +1103,8 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   function posted(sending) {
+    if (sending.done) return;
+    sending.done = true;
     if (composer.unsure === sending) composer.unsure = null;
     const ta = document.getElementById('fcom');
     // only what was sent is cleared: text typed since then stays
@@ -1107,7 +1114,8 @@ html.kr-portal .kr-side { border-right: 0; }
       if (subject?.value === sending.subject) subject.value = '';
       const file = document.getElementById('fupfile');
       if (file) file.value = '';
-      composer.touched = false;
+      // a title changed while it was on its way is still a draft
+      composer.touched = !!subject?.value.trim();
       collapse();
     }
     if (sending.mode === 'reply') {
@@ -1446,7 +1454,7 @@ html.kr-portal .kr-side { border-right: 0; }
 
   async function fetchThread(res, page = null, param = 'page') {
     const url = threadUrl(res);
-    const r = await fetch(page === null ? url : `${url}${url.includes('?') ? '&' : '?'}${param}=${page}`, { credentials: 'same-origin' });
+    const r = await fetch(page === null ? url : `${url}${url.includes('?') ? '&' : '?'}${param}=${page}`, { credentials: 'same-origin', cache: 'no-cache' });
     if (!r.ok) throw new Error(`伺服器回應 HTTP ${r.status}`);
     const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     if (site.kind === 'pixmicat') wrapThreads(doc.getElementById('threads'));
