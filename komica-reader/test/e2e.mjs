@@ -455,6 +455,21 @@ try {
     await shot(page, '8-portal.png');
   }
 
+  // the site's own thread page in dark mode: its posts must not stay beige under the reader's white text
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(`https://gaia.komica1.org/00b/pixmicat.php?res=${target}`, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  await page.waitForTimeout(800);
+  const threadDark = await page.evaluate(() => {
+    const q = document.querySelector('#threads .reply .quote, #threads .threadpost .quote');
+    if (!q) return null;
+    const paint = (n) => { for (; n; n = n.parentElement) { const b = getComputedStyle(n).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(b)) return b; } return 'rgb(255, 255, 255)'; };
+    const lum = (c) => { const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const [a, b] = [lum(getComputedStyle(q).color), lum(paint(q))].sort((x, y) => y - x);
+    return { fg: getComputedStyle(q).color, bg: paint(q), contrast: Math.round(((a + 0.05) / (b + 0.05)) * 10) / 10 };
+  });
+  await page.emulateMedia({ colorScheme: 'light' });
+  check("thread page: in dark mode the site's posts are readable (contrast 4.5 or more)", !!threadDark && threadDark.contrast >= 4.5, JSON.stringify(threadDark));
+
   // --- 2cat: the classic template (career: replies inside the OP) and the newer one (cellphone: whole page in #scroller,
   // long threads paged). The truth is the site's own markup, fetched and counted here, every page of a paged thread.
   for (const [name, url, label] of [['career', 'https://2cat.org/career/', '職業'], ['cellphone', 'https://2cat.org/cellphone/', '手機遊戲']]) {
@@ -518,13 +533,35 @@ try {
     check(`2cat ${name}: images in the thread are the originals`, !media || (/\/src\//.test(media.src) && media.natural > 0), JSON.stringify(media));
     const no = await page.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op) .kr-post-no')].at(-1)?.dataset.no);
     await page.locator(`.kr-pane .kr-post-no[data-no="${no}"]`).click();
-    const quoted2 = await page.evaluate(() => ({ value: document.getElementById('fcom')?.value, resto: document.querySelector('#postform_main input[name="resto"]')?.value, state: document.getElementById('postform_main').dataset.krState }));
-    check(`2cat ${name}: No. quotes into the board's form, which replies to this thread`, quoted2.value?.includes(`>>${no}\n`) && quoted2.resto === String(res) && quoted2.state === 'expanded', JSON.stringify({ ...quoted2, res, no }));
+    const quoted2 = await page.evaluate(() => ({ value: document.getElementById('fcom')?.value, resto: document.querySelector('#postform_main input[name="resto"]')?.value, state: document.getElementById('postform_main').dataset.krState, boxHeight: Math.round(document.getElementById('fcom')?.getBoundingClientRect().height || 0) }));
+    // the text box has to be there to be seen, not only to hold the quote (2cat hides its fields in #postform.hide)
+    check(`2cat ${name}: No. quotes into the board's form, which replies to this thread, and the box shows`, quoted2.value?.includes(`>>${no}\n`) && quoted2.resto === String(res) && quoted2.state === 'expanded' && quoted2.boxHeight > 40, JSON.stringify({ ...quoted2, res, no }));
     await page.keyboard.press('Escape');
     const fit = await page.evaluate(() => ({ rowsRight: Math.max(...[...document.querySelectorAll('#threads .thread')].map((n) => Math.round(n.getBoundingClientRect().right))), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) }));
     check(`2cat ${name}: the list stays left of the open pane`, fit.rowsRight <= fit.paneLeft, JSON.stringify(fit));
     await shot(page, `9-2cat-${name}.png`);
   }
+
+  // 2cat's 18禁 boards answer a file link with their own player page; the pane offers that page when a <video> cannot
+  // play the answer. Shown here without an 18禁 board: a SFW board's video answered with HTML, as theirs are.
+  // A fresh context: the page before this one has hundreds of media elements loaded, and intercepting media under it stalled the run.
+  const video = /\/src\/\d+\.(?:webm|mp4)$/;
+  const fresh = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW', colorScheme: 'light' });
+  await fresh.addInitScript(wrapped);
+  const vpage = await fresh.newPage();
+  await vpage.route(video, (route) => route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: '<html><body><video id="p" controls></video></body></html>' }));
+  await vpage.goto('https://2cat.org/cellphone/', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+  const videoRes = (await vpage.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null)) && (await vpage.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelector('a.imglink[title$=".webm" i], a.imglink[title$=".mp4" i]'))?.dataset.no));
+  if (videoRes) {
+    await vpage.locator(`#threads .thread[data-no="${videoRes}"] .kr-meta-count`).click({ timeout: 15000 }).catch(() => null);
+    const offered = await vpage.waitForSelector('.kr-pane .kr-player-start', { timeout: 15000 }).then(() => true, () => false);
+    await vpage.locator('.kr-pane .kr-player-start').first().click({ timeout: 10000 }).catch(() => null);
+    const framed = await vpage.evaluate(() => document.querySelector('.kr-pane iframe.kr-player')?.getAttribute('src') || null);
+    check('2cat: a video the board answers with its own player page is offered in that player', offered && video.test(framed || ''), JSON.stringify({ offered, framed }));
+  } else {
+    console.log('NOTE  2cat cellphone: no video thread on the first page; the player fallback was not exercised');
+  }
+  await fresh.close();
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);

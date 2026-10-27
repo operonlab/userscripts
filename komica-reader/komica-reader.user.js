@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.5.0
+// @version      0.5.1
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -422,6 +422,24 @@
     return posts.some((p) => p.no > after && squash(p.text).includes(squash(probe)));
   }
 
+  // <base>/src/<file>: the file store a link points into, or null for a link the board wrote wrong. A post on GIF裡
+  // links "gifura/src/…" from /gifura/, which resolves to /gifura/gifura/src/: a path-relative link that leaves the
+  // board's own directory is a typo, not a second file store (it took every thumbnail on the board with it)
+  function fileBase(href, page) {
+    let url;
+    try {
+      url = new URL(href, page);
+    } catch {
+      return null;
+    }
+    const at = url.pathname.lastIndexOf('/src/');
+    if (at < 0) return null;
+    const base = url.pathname.slice(0, at);
+    const dir = new URL(page).pathname.replace(/[^/]*$/, '').replace(/\/$/, '');
+    if (!/^(?:[a-z][a-z\d+.-]*:|\/)/i.test(href) && base !== dir) return null;
+    return `${url.origin}${base}`;
+  }
+
   // links and images in post text may go to the web and nowhere else; the URL parser decides, as the browser will
   // (it drops tabs and leading control characters that a pattern would miss)
   function webUrl(value, base) {
@@ -433,7 +451,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -577,12 +595,16 @@ html.kr .kr-composer #postform_tbl { width: 100%; margin: 0 !important; border-c
 html.kr .kr-composer #postform_tbl td { padding: 0 4px; border: 0 !important; background: none !important; color: var(--kr-text2) !important; font-size: 12px; vertical-align: middle; }
 html.kr .kr-composer #postform_tbl td.Form_bg { width: 4.5em; white-space: nowrap; }
 html.kr .kr-composer #postform_tbl td.Form_bg b { font-weight: 500; }
-html.kr .kr-composer input[type="text"], html.kr .kr-composer textarea { box-sizing: border-box; padding: 6px 9px; border: .5px solid var(--kr-sep);
+html.kr .kr-composer input[type="text"], html.kr .kr-composer input[type="password"], html.kr .kr-composer select, html.kr .kr-composer textarea { box-sizing: border-box; padding: 6px 9px; border: .5px solid var(--kr-sep);
   border-radius: 8px; background: var(--kr-bg) !important; color: var(--kr-text) !important; font: 14px var(--kr-font); }
 html.kr .kr-composer #fcom { width: 100% !important; height: 8.5em !important; resize: vertical; line-height: 1.5; }
-html.kr .kr-composer #fname, html.kr .kr-composer #fsub, html.kr .kr-composer input[name="category"] { width: 72%; }
-html.kr .kr-composer input[type="submit"] { height: 28px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--kr-accent); color: #fff;
-  font: 600 13px var(--kr-font); cursor: pointer; }
+/* fields the site sizes by character count (size="28") would push a phone-wide form past its edge */
+html.kr .kr-composer #fname, html.kr .kr-composer #fsub, html.kr .kr-composer input[name="category"], html.kr .kr-composer #femail[type="text"],
+html.kr .kr-composer input[type="password"] { width: 72%; }
+html.kr .kr-composer select { max-width: 48%; padding: 4px 6px; }
+/* 2cat draws its 送出 as a 70px-tall disc */
+html.kr .kr-composer input[type="submit"] { height: 28px !important; width: auto !important; min-width: 0 !important; padding: 0 16px !important; border: 0; border-radius: 999px;
+  background: var(--kr-accent) !important; color: #fff !important; font: 600 13px var(--kr-font) !important; cursor: pointer; }
 html.kr .kr-composer-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
 html.kr .kr-composer-toggle { flex: 1; min-height: 26px; padding: 0; border: 0; background: none; color: var(--kr-text); font: 600 14px var(--kr-font);
   text-align: left; cursor: pointer; }
@@ -598,6 +620,14 @@ html.kr-md .kr-composer.kr-reply-pane { right: 12px; bottom: 12px; width: calc(v
 html.kr-md:not(.kr-pane-open) .kr-composer.kr-reply-pane { right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px)); }
 html.kr-md .kr-composer.kr-reply-pane[data-kr-state="expanded"] { max-height: 70vh; }
 html.kr-md .kr-composer.kr-reply-pane[data-kr-state="collapsed"] .kr-composer-toggle { font-weight: 400; color: var(--kr-text2); }
+/* the site's own thread page keeps its markup but takes the reader's colors: its beige posts under white dark-mode text were unreadable */
+html.kr-thread #threads .threadpost, html.kr-thread #threads .reply { background: var(--kr-card) !important; color: var(--kr-text) !important; border-color: var(--kr-sep) !important; border-radius: var(--kr-r); }
+/* 2cat's 推文 under a post come painted beige by the site; in the pane and on its thread page they take the reader's fill */
+html.kr .kr-post-text .push_area, html.kr-thread #threads .push_area { margin-top: 8px; padding: 6px 10px; border-radius: 8px;
+  background: var(--kr-fill) !important; color: var(--kr-text2) !important; font-size: 13px; }
+/* 2cat keeps its form fields in #postform.hide until its own toggle opens them; the floating form shows them itself
+   (folded, they sit off screen like everyone else's) */
+html.kr .kr-composer #postform.hide { display: block !important; }
 html.kr-thread .kr-composer.kr-reply { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: 820px; margin: 0 auto; }
 html.kr-thread .kr-composer.kr-reply[data-kr-state="expanded"] { max-height: 75vh; }
 html.kr-thread body { padding-bottom: 88px !important; }
@@ -632,6 +662,9 @@ html.kr .kr-post-media { position: relative; display: inline-block; max-width: 1
 html.kr .kr-post-media img, html.kr .kr-post-media video { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto;
   border-radius: 10px; background: var(--kr-fill); }
 html.kr .kr-post-media img { cursor: zoom-in; }
+html.kr .kr-player-start, html.kr .kr-player { display: block; width: min(560px, 100%); max-height: 70vh; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }
+html.kr .kr-player-start { background: #000 center / contain no-repeat; color: #fff; font-size: 40px; cursor: pointer; text-shadow: 0 2px 12px rgba(0, 0, 0, .8); }
+html.kr .kr-player { background: #000; }
 html.kr .kr-post-file { margin-top: 4px; font-size: 11px; color: var(--kr-text3); }
 html.kr .kr-spoiler img, html.kr .kr-spoiler video { filter: blur(28px) saturate(.6); pointer-events: none; }
 html.kr .kr-spoiler-btn { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 10px; background: rgba(0, 0, 0, .25); color: #fff;
@@ -1267,9 +1300,12 @@ html.kr-portal .kr-side { border-right: 0; }
   // 2cat's newer boards fill image links in with script; the live page shows where they point
   function mediaBase() {
     if (site.mediaBase) return site.mediaBase;
-    const live = document.querySelector('#threads a.imglink[href*="/src/"]')?.href;
-    if (live) return (site.mediaBase = live.slice(0, live.indexOf('/src/')));
-    return `https://cat.2nyan.org${location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '')}`;
+    const dir = location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '');
+    const bases = [...document.querySelectorAll('#threads a.imglink[href*="/src/"], #threads a[href*="/src/"]')].map((a) => fileBase(a.getAttribute('href'), location.href)).filter(Boolean);
+    // the board's own directory on whichever host serves it beats a link into some other board's files
+    const base = bases.find((b) => new URL(b).pathname === dir) || bases[0];
+    if (base) return (site.mediaBase = base);
+    return `https://cat.2nyan.org${dir}`;
   }
 
   // the board's own reply links say how its thread URLs look: pixmicat.php?res=N, ?res=N, /board/?res=N
@@ -1291,13 +1327,16 @@ html.kr-portal .kr-side { border-right: 0; }
     const imglink = own(post, 'a.imglink[title]');
     const img = (fileA || imglink)?.querySelector('img') || own(post, 'img.img');
     let src = fileA?.getAttribute('href') || '';
+    // a file link the board wrote wrong is rebuilt from its file name
+    if (src && !fileBase(src, location.href)) src = `${mediaBase()}/src/${src.split(/[?#]/)[0].split('/').pop()}`;
     let thumb = img?.getAttribute('data-original') || '';
     if (!src && imglink?.title && /\.\w{3,4}$/.test(imglink.title)) {
       const base = mediaBase();
       src = `${base}/src/${imglink.title}`;
-      if (img?.alt) thumb = `${base}/thumb/${img.alt}s.jpg`;
+      if (/^\d+$/.test(img?.alt || '')) thumb = `${base}/thumb/${img.alt}s.jpg`;
     }
-    if (!thumb && imglink && img?.alt) thumb = `${mediaBase()}/thumb/${img.alt}s.jpg`;
+    // the alt is the file's number (a stray post has "1855 KB" there instead)
+    if (!thumb && imglink && /^\d+$/.test(img?.alt || '')) thumb = `${mediaBase()}/thumb/${img.alt}s.jpg`;
     if (!thumb && img && !/\/(trans|white)\.png$/.test(img.getAttribute('src') || '')) thumb = img.getAttribute('src') || '';
     const abs = (u) => (u ? new URL(u, location.href).href : '');
     const info = own(post, '.imglink2')?.textContent.trim() || /[\w.-]+\.(?:jpe?g|png|gif|webp|webm|mp4)-\([^)]*\)/i.exec(head)?.[0] || '';
@@ -1372,11 +1411,18 @@ html.kr-portal .kr-side { border-right: 0; }
     if (m.kind === 'video') {
       node = el('video', { controls: '', preload: 'metadata', playsinline: '', src: m.src });
       if (m.thumb) node.poster = m.thumb;
+      // 2cat's 18禁 boards answer a video link with their own player page, not the file, and a <video> gives up on
+      // it (MEDIA_ERR_SRC_NOT_SUPPORTED): offer that page instead
+      node.addEventListener('error', () => webUrl(m.src, location.href) && node.replaceWith(playerPage(m)), { once: true });
     } else {
       node = el('img', { src: m.src, alt: '', loading: 'lazy', decoding: 'async' });
       node.dataset.full = m.src;
-      // the board syncs uploads to its image host in the background: until then only the thumbnail exists
-      if (m.thumb) node.addEventListener('error', () => node.getAttribute('src') !== m.thumb && node.setAttribute('src', m.thumb), { once: true });
+      // the original did not load. gaia syncs uploads to its image host in the background, and until then only the
+      // thumbnail exists; 2cat's 18禁 boards answer a GIF link with their own viewer page, which a frame can show
+      node.addEventListener('error', () => {
+        if (site.kind === 'pixmicat' && webUrl(m.src, location.href)) node.replaceWith(playerPage(m));
+        else if (m.thumb && node.getAttribute('src') !== m.thumb) node.setAttribute('src', m.thumb);
+      }, { once: true });
     }
     // images reserve their box from the file line; videos take their own size (the line can be off for them)
     if (m.dims && m.kind !== 'video') {
@@ -1387,6 +1433,19 @@ html.kr-portal .kr-side { border-right: 0; }
     if (m.spoiler) box.append(el('button', { type: 'button', class: 'kr-spoiler-btn' }, '發文者標了防雷・點一下顯示'));
     if (m.info) box.append(el('div', { class: 'kr-post-file' }, m.info));
     return box;
+  }
+
+  // the board's own player, loaded on a click so that a thread of videos does not start playing all at once
+  function playerPage(m) {
+    const start = el('button', { type: 'button', class: 'kr-player-start', title: '用網站自己的播放器開啟' }, '▶');
+    if (m.thumb) start.style.backgroundImage = `url(${JSON.stringify(m.thumb)})`;
+    if (m.dims) start.style.aspectRatio = `${m.dims.w} / ${m.dims.h}`;
+    start.addEventListener('click', () => {
+      const frame = el('iframe', { class: 'kr-player', src: m.src, title: '影片', allow: 'autoplay; fullscreen', allowfullscreen: '' });
+      frame.style.aspectRatio = start.style.aspectRatio;
+      start.replaceWith(frame);
+    });
+    return start;
   }
 
   function renderPosts(res, posts, note) {
@@ -1805,7 +1864,12 @@ html.kr-portal .kr-side { border-right: 0; }
           const op = readPixmicatPost(card.querySelector('.threadpost'));
           const row = el('div', { class: 'kr-row' });
           const thumb = op.media && (op.media.thumb || (op.media.kind === 'image' ? op.media.src : ''));
-          if (thumb) row.append(el('img', { class: 'kr-row-thumb', src: thumb, alt: '', loading: 'lazy', decoding: 'async' }));
+          if (thumb) {
+            // a board's own placeholder can be missing too (nosample.jpg): no picture beats a broken one
+            const pic = el('img', { class: 'kr-row-thumb', src: thumb, alt: '', loading: 'lazy', decoding: 'async' });
+            pic.addEventListener('error', () => pic.remove(), { once: true });
+            row.append(pic);
+          }
           const words = el('div', { class: 'kr-row-text' });
           if (op.title && !UNTITLED.test(op.title)) words.append(el('div', { class: 'kr-row-title' }, op.title));
           words.append(el('div', { class: 'kr-row-snippet' }, (op.quote?.innerText || op.quote?.textContent || '').trim()));

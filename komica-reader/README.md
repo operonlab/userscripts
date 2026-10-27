@@ -20,6 +20,8 @@ A userscript that turns Komica's 綜合 board (`gaia.komica1.org/00b/`, includin
 1. Install a userscript manager: [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/). In Chrome 138 and later, also turn on **Allow user scripts** on the manager's page in `chrome://extensions`.
 2. Open [komica-reader.user.js](https://raw.githubusercontent.com/operonlab/userscripts/main/komica-reader/komica-reader.user.js) and accept the install.
 
+On a phone, use a userscript manager for the phone's browser: Tampermonkey or Macaque for Safari on iOS, Tampermonkey or Violentmonkey in Firefox for Android. The narrow layout (thread over the list, sidebar as an overlay, the form across the bottom) has been checked in an emulated iPhone, not yet on a device.
+
 ## Limits
 
 - The reader runs on `gaia.komica1.org/00b/` and on 2cat's boards, both its older layout (職業) and its newer one (手機遊戲). Links to Komica's other boards open those boards' own pages; they run other software on other hosts.

@@ -3,6 +3,14 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.5.1 — 2026-10-27
+
+- **Videos and thumbnails on GIF裡** (and the other boards on `cat.2nyan.org`). One post there links its file wrongly, and while it was on the page every thumbnail and video on the board went to an address that does not exist. Links like it are now set aside.
+- Videos and GIFs that a board serves only through its own player page (2cat's 18禁 boards) show as their thumbnail with ▶; tapping it opens the board's player in the post.
+- A list thumbnail that cannot load is left out instead of showing as a broken image.
+- **Dark mode on the site's own thread pages**: posts take the reader's colors. They kept the site's beige under white text. 2cat's 推文 likewise, in the pane too.
+- **2cat's form shows its fields.** They sat in a section the site keeps folded, so the floating form opened empty. They now also fit a phone's width, and 送出 is the reader's own button.
+
 ## 0.5.0 — 2026-10-27
 
 - **2cat boards** (`2cat.org`, `2cat.uk`) get the same reader: list rows, the thread pane, the floating form and the sidebar. Both of 2cat's layouts are read, the older one (職業) and the newer one (手機遊戲).

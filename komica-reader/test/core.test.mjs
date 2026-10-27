@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -239,4 +239,13 @@ test("another board's later pages and threads count as that board", () => {
   assert.equal(matchBoard('https://2cat.org/careers/1.htm', more), null);
   assert.equal(matchBoard('https://2cat.uk/cellphone/', more), null); // a board below another board's directory is not it
   assert.equal(matchBoard('https://example.org/model/2.htm', more), more[2]);
+});
+
+test("a file link that leaves the board's own directory is not where its files are", () => {
+  assert.equal(fileBase('gifura/src/1777303624410.mp4', 'https://cat.2nyan.org/gifura/'), null); // resolves to /gifura/gifura/src/
+  assert.equal(fileBase('https://cat.2nyan.org/cellphone/src/1.jpg', 'https://2cat.org/cellphone/'), 'https://cat.2nyan.org/cellphone');
+  assert.equal(fileBase('//p.2cat.org/hiso/src/1.jpg', 'https://2cat.org/hiso/'), 'https://p.2cat.org/hiso');
+  assert.equal(fileBase('src/1.jpg', 'https://2cat.org/hiso/pixmicat.php?res=3'), 'https://2cat.org/hiso');
+  assert.equal(fileBase('https://cat.2nyan.org/chatura/src/1.jpg', 'https://2cat.org/~chatura/'), 'https://cat.2nyan.org/chatura'); // absolute links are taken as written
+  assert.equal(fileBase('pixmicat.php?res=1', 'https://2cat.org/hiso/'), null);
 });
