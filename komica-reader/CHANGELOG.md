@@ -3,6 +3,10 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.1 — 2026-10-27
+
+- **When the site pauses voting, the reader shows it.** The site then turns every ▲▼ off and puts up 系統忙碌，投票功能暫停，請稍後再試。 The reader had set that notice in small grey type, under the reply form on a phone with a thread open, and drew the turned-off ▲▼ like working ones, so a tap did nothing and nothing said why. The notice now keeps the site's warning colours and, on a phone with a thread open, sits above the folded reply form (the form, opened, still covers it); the turned-off ▲▼ are dimmed, and the pane's ▲▼ are off from the start as the site's are. When the site reopens voting, all of them work again.
+
 ## 0.6.0 — 2026-10-27
 
 What users of the board asked for, and the site features they like, carried into the reader.

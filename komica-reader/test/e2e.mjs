@@ -855,6 +855,88 @@ try {
   }
   await vctx.close();
 
+  // the site has paused voting (vote_status says so, as the live site may at any time): it shows its notice and disables
+  // every ▲▼ on the page. On a phone, with a thread open: the notice must be seen, the ▲▼ look off, nothing goes out.
+  const pctx = await browser.newContext({ viewport: { width: 393, height: 852 }, locale: 'zh-TW', colorScheme: 'light' });
+  await pctx.addInitScript(wrapped);
+  const pstopped = [];
+  await pctx.route(/gaia\.komica1\.org\/00b\//, (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && /^mode=edit_links&/.test(q.postData() || '')) return r.continue();
+    if (q.method() !== 'GET' || /mod_report|post_vote\.php/.test(q.url())) {
+      pstopped.push(`${q.method()} ${q.url()}`);
+      return r.abort();
+    }
+    return r.continue();
+  });
+  // the site's first check is answered paused. Its later ones (every 30s, and on visibilitychange) disable or enable every
+  // ▲▼ on the page, the pane's too, so they wait until the checks on the reader's own drawing are done; then voting reopens.
+  let statusHits = 0;
+  let reopened = false;
+  const heldStatus = [];
+  const statusBody = (paused) => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ paused }) });
+  await pctx.route(/vote_status\.json/, (r) => {
+    statusHits++;
+    if (statusHits === 1) return r.fulfill(statusBody(true));
+    if (reopened) return r.fulfill(statusBody(false));
+    heldStatus.push(r);
+  });
+  const pp = await pctx.newPage();
+  const pdialogs = [];
+  pp.on('dialog', (d) => { pdialogs.push(d.message()); d.dismiss(); });
+  await pp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  const banner = await pp.waitForFunction(() => document.getElementById('gaia-vote-pause-notice')?.style.display === 'block', null, { timeout: 20000 }).catch(() => null);
+  const pres = banner && await pp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((n) => n.querySelector('.threadpost .postvote-up'))?.dataset.no);
+  if (pres) {
+    const prow = await pp.evaluate((res) => {
+      const b = document.querySelector(`#threads .thread[data-no="${res}"] .threadpost .postvote-up`);
+      return { disabled: b.disabled, opacity: Number(getComputedStyle(b).opacity) };
+    }, pres);
+    check('paused: the row\'s ▲▼ are the site\'s disabled ones, and look it', prow.disabled && prow.opacity < 0.6, JSON.stringify(prow));
+    await pp.locator(`#threads .thread[data-no="${pres}"] .kr-meta-count`).click();
+    await pp.waitForSelector('.kr-pane .kr-post .kr-vote .postvote-up', { timeout: 15000 });
+    const paneVotes = () => pp.evaluate(() => {
+      const btns = [...document.querySelectorAll('.kr-pane .kr-vote .postvote-btn')];
+      return { n: btns.length, disabled: btns.filter((b) => b.disabled).length, redrawn: btns.filter((b) => !b.dataset.e2eSeen).length };
+    });
+    const ppane = await paneVotes();
+    check('paused: the pane\'s ▲▼ are drawn disabled, as the site left its own', ppane.n > 0 && ppane.disabled === ppane.n, JSON.stringify(ppane));
+    await pp.waitForTimeout(400);
+    const seen = await pp.evaluate(() => {
+      const b = document.getElementById('gaia-vote-pause-notice');
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { rect: [r.left, r.top, r.width, r.height].map(Math.round), onTop: b.contains(top) ? 'self' : `${top?.tagName}.${top?.className}`, bg: getComputedStyle(b).backgroundColor };
+    });
+    check('paused: on a phone with a thread open, the site\'s notice is in sight, in its warning colours', seen.onTop === 'self' && seen.rect[2] > 0 && seen.bg === 'rgb(255, 240, 199)', JSON.stringify(seen));
+    // a real tap on the ▲ itself (a disabled button swallows it; an enabled one would reach the site's alert)
+    // (placed and hit-tested in one go: an image loading above it between two calls moves it)
+    const tap = await pp.locator('.kr-pane .kr-vote .postvote-up').first().evaluate((b) => {
+      b.scrollIntoView({ block: 'center' });
+      const r = b.getBoundingClientRect();
+      const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+      const t = document.elementFromPoint(x, y);
+      return { x, y, hit: t === b || `${t?.tagName}.${t?.className}` };
+    });
+    if (tap.hit === true) await pp.mouse.click(tap.x, tap.y);
+    await pp.waitForTimeout(500);
+    check('paused: tapping a pane ▲ does nothing and sends nothing', tap.hit === true && pstopped.length === 0 && pdialogs.length === 0, JSON.stringify({ ...tap, pstopped, pdialogs }));
+    // voting reopens: the site's next check enables its ▲▼ and drops the notice, and the thread drawn again has working ▲▼
+    reopened = true;
+    for (const r of heldStatus.splice(0)) await r.fulfill(statusBody(false));
+    await pp.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    const gone = await pp.waitForFunction(() => document.getElementById('gaia-vote-pause-notice')?.style.display === 'none', null, { timeout: 10000 }).catch(() => null);
+    await pp.evaluate(() => { for (const b of document.querySelectorAll('.kr-pane .kr-vote .postvote-btn')) b.dataset.e2eSeen = '1'; });
+    await pp.locator('.kr-pane-back').click();
+    await pp.locator(`#threads .thread[data-no="${pres}"] .kr-meta-count`).click();
+    await pp.waitForFunction(() => document.querySelector('.kr-pane .kr-vote .postvote-btn:not([data-e2e-seen])'), null, { timeout: 15000 }).catch(() => null);
+    const open = await paneVotes();
+    check('paused, then reopened: the notice goes and the thread drawn again has working ▲▼', !!gone && open.n > 0 && open.redrawn === open.n && open.disabled === 0, JSON.stringify({ gone: !!gone, ...open }));
+  } else {
+    check('paused: the board loaded with the site\'s notice and a row with ▲▼', false, JSON.stringify({ banner: !!banner, statusHits }));
+  }
+  await pctx.close();
+
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);
 } catch (e) {

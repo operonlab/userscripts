@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.0
+// @version      0.6.1
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -492,10 +492,11 @@ html.kr {
   --kr-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
   --kr-sel: color-mix(in srgb, var(--kr-accent) 13%, var(--kr-card));
   --kr-id1: #0a6fd6; --kr-id2: #b85c00; --kr-id3: #c4312a;
+  --kr-warn-bg: #fff0c7; --kr-warn-text: #6d3700;
 }
 html.kr[data-kr-dark] {
   --kr-text: #f5f5f7; --kr-text2: #a1a1a6; --kr-text3: #6e6e73;
-  --kr-id1: #5aa9ff; --kr-id2: #ffa94d; --kr-id3: #ff7b72;
+  --kr-id1: #5aa9ff; --kr-id2: #ffa94d; --kr-id3: #ff7b72; --kr-warn-bg: #4a3613; --kr-warn-text: #ffd98a;
   --kr-bg: #1e1e20; --kr-list-bg: #141416; --kr-card: #232326; --kr-fill: rgba(120, 120, 128, .24); --kr-fill2: rgba(120, 120, 128, .36);
   --kr-sep: rgba(255, 255, 255, .1); --kr-glass: rgba(38, 38, 41, .8); --kr-bar: rgba(30, 30, 32, .86); --kr-shadow: 0 10px 34px rgba(0, 0, 0, .5);
   color-scheme: dark;
@@ -533,9 +534,10 @@ html.kr .kr-menu a:hover { background: var(--kr-accent); color: #fff !important;
 html.kr .kr-menu-sep { height: .5px; margin: 6px 4px; background: var(--kr-sep); }
 html.kr .kr-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--kr-text2); }
 html.kr .kr-menu-row select { font: inherit; }
+/* the site's 投票暫停 notice: while it shows, the site has disabled every ▲▼, so it keeps the site's warning colours */
 html.kr #gaia-vote-pause-notice { position: fixed !important; left: calc(var(--kr-side) + 18px) !important; right: auto !important; top: auto !important; bottom: 16px !important;
   z-index: 60 !important; width: auto !important; max-width: 300px; margin: 0 !important; padding: 6px 12px !important; border: 0 !important; border-radius: 999px !important;
-  background: var(--kr-glass) !important; backdrop-filter: blur(20px); color: var(--kr-text2) !important; font: 12px var(--kr-font) !important; box-shadow: var(--kr-shadow) !important; }
+  background: var(--kr-warn-bg) !important; color: var(--kr-warn-text) !important; font: 600 12px var(--kr-font) !important; box-shadow: var(--kr-shadow) !important; }
 
 /* master rows */
 html.kr-md #threads .thread { max-width: 980px; margin: 0 auto 8px; padding: 12px 14px; border: 0; border-radius: var(--kr-r); background: var(--kr-card) !important;
@@ -603,6 +605,7 @@ html.kr .kr-site-ctx [hidden] { display: none !important; }
 html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
 html.kr .postvote-up-wrap { border-right-color: var(--kr-sep); }
 html.kr .postvote-btn { color: inherit; }
+html.kr .postvote-btn:disabled { opacity: .35; cursor: not-allowed; }
 /* the site's pager and footer under the list: the same links and text, set as pills and a quiet line; the [ ] around
    the pager's links are typography, sized away rather than removed */
 html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
@@ -824,6 +827,7 @@ html.kr-portal .kr-side { border-right: 0; }
   html.kr .kr-pane-close, html.kr .kr-pane-resize { display: none; }
   html.kr-md .kr-composer.kr-new { right: 16px; }
   html.kr-md .kr-composer.kr-reply-pane { left: 12px; right: 12px; width: auto; }
+  html.kr.kr-pane-open #gaia-vote-pause-notice { bottom: 76px !important; }
   html.kr-md #threads .thread.kr-peek .post.reply { margin-left: 0; }
 }
 `;
@@ -1516,10 +1520,12 @@ html.kr-portal .kr-side { border-right: 0; }
   function voteSlot(v) {
     const slot = el('span', { class: 'postvote-slot', 'data-no': v.no, 'data-state': v.state, 'data-up': v.up, 'data-down': v.down });
     const panel = el('span', { class: 'postvote-panel', 'aria-label': '留言評價' });
+    // the site disables the ▲▼ on the page when it finds voting paused, and only those; these come later
+    const paused = document.getElementById('gaia-vote-pause-notice')?.style.display === 'block' ? { disabled: '' } : {};
     const side = (dir, label, mark, count, mine) => {
       const wrap = el('span', { class: `postvote-${dir}-wrap` });
       wrap.append(
-        el('button', { type: 'button', class: `postvote-btn postvote-${dir}${mine ? ` has-voted-${dir}` : ''}`, title: label, 'aria-label': label }, mark),
+        el('button', { type: 'button', class: `postvote-btn postvote-${dir}${mine ? ` has-voted-${dir}` : ''}`, title: label, 'aria-label': label, ...paused }, mark),
         el('span', { class: dir === 'up' ? 'postvote-like-count' : 'postvote-dislike-count' }, count),
       );
       return wrap;
