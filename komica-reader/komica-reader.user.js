@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.5
+// @version      0.6.6
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -518,7 +518,7 @@ html.kr-md body { margin: 0 0 0 var(--kr-side) !important; padding: 0 18px 28px 
 html.kr-md.kr-pane-open body { margin-right: var(--kr-drawer-w) !important; }
 html.kr-docked:not(.kr-pane-open) .kr-pane { display: none; }
 /* 2cat's newer boards keep the threads and the form inside #header: fold only the header's own chrome */
-html.kr-md #header > :not(:has(#threads, #postform_main)):not(#threads, #postform_main), html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
+html.kr-md #header > :not(:has(#threads, #postform_main)):not(#threads, #postform_main), html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
 html.kr-md #del, html.kr-md #threads .thread > hr { display: none !important; }
 html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; margin: 0 -18px 12px; padding: 10px 18px;
   background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
@@ -592,7 +592,29 @@ html.kr .kr-row-text { flex: 1; min-width: 0; margin-right: 56px; }
 html.kr .kr-row-title { margin-bottom: 2px; font: 600 15px/1.35 var(--kr-font); color: var(--kr-text); }
 html.kr .kr-row-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line;
   font-size: 14px; line-height: 1.55; color: var(--kr-text); }
-html.kr-md ins.adsbygoogle, html.kr-md #ad0, html.kr-md #ad { display: none !important; }
+/* the site's ads, as cards of their own marked 廣告 where the site puts them, never floated beside a row: on 綜合 above
+   the list, the web or phone banner as the site's own rules pick (so no display here); on 2cat in the list, and on its
+   older boards the column beside the list, its units side by side. 綜合's ad server answers "no banner" with its
+   counting pixel alone (the beacon_ box): a slot holding nothing else is not shown. AdSense: a card none of whose units
+   its script has taken up (blocked, or never handed one) or whose every unit it left "unfilled" folds to nothing,
+   still laid out; once taken up, a unit loads only when it comes into view, which a folded one never does, so the card
+   shows what the site shows until AdSense answers. "unfill-optimized" is no empty slot: its 深入瞭解 search topics.
+   Folded by max-height: AdSense writes height:auto !important into the card's own style */
+html.kr-md #board-post-transition { max-width: 980px; margin: 0 auto; }
+html.kr-md :is(#board-post-transition .board-post-ad, #contents > #ad, #threads #ad0, #threads a:has(> ins.had2)) { position: relative; box-sizing: border-box;
+  width: auto !important; max-width: 980px; margin: 0 auto 8px !important; padding: 24px 14px 12px; border-radius: var(--kr-r); background: var(--kr-card);
+  text-align: center; float: none !important; }
+html.kr-md #threads a:has(> ins.had2) { display: block; }
+html.kr-md #contents > #ad { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+html.kr-md #contents > #ad > br { display: none; }
+html.kr-md #contents > #ad > center { position: absolute; top: 5px; right: 14px; font-size: 11px; }
+html.kr-md :is(.board-post-ad, #contents > #ad, #threads #ad0, #threads a:has(> ins.had2))::before { content: '廣告'; position: absolute;
+  top: 6px; left: 14px; font: 11px var(--kr-font); color: var(--kr-text3); }
+html.kr-md #threads ins.had2 { float: none !important; margin: 0 auto; }
+html.kr-md :is(#contents > #ad, #threads #ad0, #threads a:has(> ins.had2)):not(:has(ins.adsbygoogle[data-adsbygoogle-status]:not([data-ad-status="unfilled"]))) {
+  max-height: 0 !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden; }
+html.kr-md #board-post-transition .board-post-ad:not(:has(:not(ins, [id^="beacon_"], [id^="beacon_"] *, script, style, noscript, br))),
+html.kr-md ins.adsbygoogle[data-ad-status="unfilled"] { display: none !important; }
 /* 2cat's newer boards lay the whole page in an absolute #scroller over the window, past the sidebar and the pane; its #navi
    is a second list of this page's threads */
 html.kr-md #scroller { position: static !important; width: auto !important; height: auto !important; }
@@ -2377,15 +2399,6 @@ html.kr-portal .kr-side { border-right: 0; }
         });
       }).observe(threads, { childList: true, subtree: true });
     }
-
-    // a row the pointer rests on is probably next: start its fetch
-    let hoverTimer = null;
-    threads?.addEventListener('mouseover', (e) => {
-      const card = e.target.closest('.thread[data-no]');
-      if (!card || card.contains(e.relatedTarget)) return;
-      clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => loadThread(Number(card.dataset.no)).catch(() => {}), 180);
-    });
 
     window.addEventListener(
       'click',

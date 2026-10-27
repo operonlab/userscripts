@@ -3,6 +3,11 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.6 — 2026-10-28
+
+- **The site's ads are back, in the reader's style.** The reader had hidden them all. Now each one is a card of its own marked 廣告, where the site puts it and no longer floated beside a row: on 綜合 above the list, the site's wide-screen or phone banner as the site picks it; on 2cat among the threads, and on 2cat's older boards (職業) the column the site keeps beside the list, now a card above it. A slot the ad network left empty is not shown.
+- **A row the pointer rests on is no longer fetched ahead.** Every row the pointer crossed cost the board's server a whole thread page, read or not. The row after the one you open is still fetched ahead, as before.
+
 ## 0.6.5 — 2026-10-27
 
 - **Videos go fullscreen again from the komica1.org portal.** The portal shows boards in an old-style frame, and the browser lets nothing from another address inside it go fullscreen: every video's button was grey (on the plain site too). The portal's sidebar now opens a board as the page itself, with the reader's own sidebar. A board or thread found in a frame that cannot let it go fullscreen says so at the top, with a link that opens it as the page.

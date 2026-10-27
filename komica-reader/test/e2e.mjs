@@ -137,6 +137,17 @@ try {
   }));
   const before = await layout();
   check('pane: no thread open, no pane — the list has the whole width', before.pane === 'none' && before.bodyRight === '0px', JSON.stringify(before));
+  // a row the pointer rests on is not fetched ahead: that cost the board's server a thread page for every row crossed
+  const restOn = list.at(-1)?.res;
+  const restFetches = [];
+  const onRequest = (q) => { if (new RegExp(`[?&]res=${restOn}(?!\\d)`).test(q.url())) restFetches.push(q.url()); };
+  page.on('request', onRequest);
+  await page.locator(`#threads .thread[data-no="${restOn}"]`).hover();
+  const rested = await page.evaluate((no) => document.querySelector(`#threads .thread[data-no="${no}"]`).matches(':hover'), restOn);
+  await page.waitForTimeout(800);
+  page.off('request', onRequest);
+  await page.mouse.move(0, 0);
+  check('list: a row the pointer rests on is not fetched ahead', !!restOn && rested && restFetches.length === 0, JSON.stringify({ restOn, rested, restFetches }));
 
   // a thread with replies, an OP image and, if any, in-thread quotes
   const target = (list.find((c) => c.replies && c.image && c.quotes) || list.find((c) => c.replies && c.image) || list.find((c) => c.replies))?.res;
@@ -509,6 +520,54 @@ try {
     check(`2cat ${name}: one row per thread, replies folded, one count each`, list.rows > 0 && list.rows === list.ops && list.metas && list.repliesShown === 0, JSON.stringify(list));
     check(`2cat ${name}: the rows are as wide as each other (nothing floats beside them)`, list.widths.length === 1, JSON.stringify(list.widths));
     check(`2cat ${name}: the sidebar marks ${label} as the current board`, list.current === label, String(list.current));
+    // 2cat's ads (cellphone: in the list; career: a column the site floats beside it): cards of their own, marked 廣告,
+    // not beside a row. Whatever AdSense did headless, the first card's units are set to: not taken up by AdSense's
+    // script (blocked, say: not shown), taken up and not answered yet (shown, as the site shows it: AdSense waits for
+    // the unit to come into view), "unfill-optimized" (shown: its search topics), "unfilled" (not shown, still laid
+    // out), and one "filled". No ad on the page is left outside a card
+    const ad2 = await page.evaluate(async () => {
+      const box = document.querySelector('#threads #ad0, #contents > #ad');
+      const units = box ? [...box.querySelectorAll('ins.adsbygoogle')] : [];
+      if (!units.length) return null;
+      const shown = (n) => getComputedStyle(n).display !== 'none' && n.getBoundingClientRect().height > 0;
+      const tell = async (taken, status) => {
+        for (const ins of units) {
+          if (taken) ins.setAttribute('data-adsbygoogle-status', 'done');
+          else ins.removeAttribute('data-adsbygoogle-status');
+          if (status) ins.setAttribute('data-ad-status', status);
+          else ins.removeAttribute('data-ad-status');
+        }
+        await new Promise(requestAnimationFrame);
+      };
+      await tell(false, null);
+      const untaken = shown(box);
+      await tell(true, null);
+      const waiting = shown(box);
+      await tell(true, 'unfill-optimized');
+      const topics = shown(box) && getComputedStyle(units[0]).display !== 'none';
+      await tell(true, 'unfilled');
+      const unfilled = { shown: shown(box), width: Math.round(box.getBoundingClientRect().width) };
+      units[0].setAttribute('data-ad-status', 'filled');
+      units[0].replaceChildren(Object.assign(document.createElement('iframe'), { style: 'width:400px;height:600px;border:0' }));
+      await new Promise(requestAnimationFrame);
+      const widths = [...new Set([...document.querySelectorAll('#threads .thread')].slice(0, 4).map((row) => Math.round(row.getBoundingClientRect().width)))];
+      return {
+        box: box.id,
+        untaken,
+        waiting,
+        topics,
+        unfilled,
+        filled: shown(box),
+        widths,
+        cards: [box, ...document.querySelectorAll('#threads a:has(> ins.had2)')].map((n) => ({ label: getComputedStyle(n, '::before').content, float: getComputedStyle(n).float })),
+        stray: [...document.querySelectorAll('ins.adsbygoogle')].filter((n) => !n.closest('#contents > #ad, #threads #ad0, #threads a:has(> ins.had2)') &&
+          getComputedStyle(n).display !== 'none' && n.getBoundingClientRect().height > 0).length,
+      };
+    });
+    if (ad2) check(`2cat ${name}: its ads are cards marked 廣告, not beside a row; one AdSense left unfilled is not shown`,
+      !ad2.untaken && ad2.waiting && ad2.topics && !ad2.unfilled.shown && ad2.unfilled.width > 0 && ad2.filled && ad2.widths.length === 1 &&
+      ad2.cards.every((c) => c.label === '"廣告"' && c.float === 'none') && ad2.stray === 0, JSON.stringify(ad2));
+    else console.log(`NOTE  2cat ${name}: no ad slot in the list; the ad cards not exercised here`);
     // the thread with the most replies: on cellphone that is the paged one
     const res = await page.evaluate(() => {
       const count = (row) => Number(/(\d+) 則回應/.exec(row.querySelector('.kr-meta-count').textContent)?.[1] || 0);
@@ -593,6 +652,8 @@ try {
   });
   const sent = [];
   await vctx.route(/vote_status\.json/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"paused":false}' }));
+  // the ad server's counting pixel, answered here: the ad check below plants one, and no test page should count as a view
+  await vctx.route(/\/delivery\/lg\.php/, (r) => r.fulfill({ status: 204 }));
   await vctx.route(/post_vote\.php/, (r) => {
     if (r.request().method() !== 'POST') return r.abort();
     sent.push(r.request().postData() || '');
@@ -815,18 +876,24 @@ try {
       check('pane: replies the reader hid on the site (ID, keyword, 隱藏貼文清單) are hidden, with a note to show them', vpane.hidden >= 3 && vpane.justified && vpane.byId && vpane.byWord && vpane.byList && /藏起了 \d+ 則回覆/.test(vpane.bar), JSON.stringify({ hide, ...vpane }));
     } else console.log(`NOTE  the hidden-reply check was not exercised (read ${JSON.stringify(hide)})`);
     const victim = await vp.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op)')].filter((p) => p.getBoundingClientRect().height > 0).pop()?.dataset.no);
-    await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .postvote-down`).click();
-    await vp.waitForTimeout(600);
-    const folded = await vp.evaluate((no) => {
-      const art = document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`);
-      // the answer says the vote is yours (own_vote -1): the site marks that ▼ in its blue
-      const mine = art.querySelector('.postvote-down.has-voted-down');
-      return { vote: art.dataset.vote, down: art.querySelector('.postvote-dislike-count')?.textContent, textHeight: art.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? 0, mine: mine ? getComputedStyle(mine).color : null };
-    }, victim);
-    check('pane: ▼ goes out through the site\'s own handler, and its answer folds the post', sent.length === 1 && sent[0].startsWith(`no=${victim}&vote=down`) && folded.vote === 'collapsed' && folded.down === '9' && folded.textHeight === 0, JSON.stringify({ sent, ...folded }));
-    check('pane: your own vote shows in the site\'s colour', folded.mine === 'rgb(41, 128, 185)', JSON.stringify({ mine: folded.mine }));
-    await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .kr-fold-toggle`).click();
-    check('pane: 展開 opens a folded post', await vp.evaluate((no) => document.querySelector(`.kr-pane .kr-post[data-no="${no}"] .kr-post-text`)?.getBoundingClientRect().height > 0, victim));
+    // the reader's hidden replies can leave a short thread with none in sight: then there is nothing here to vote on
+    if (victim) {
+      await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .postvote-down`).click();
+      await vp.waitForTimeout(600);
+      const folded = await vp.evaluate((no) => {
+        const art = document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`);
+        // the answer says the vote is yours (own_vote -1): the site marks that ▼ in its blue
+        const mine = art.querySelector('.postvote-down.has-voted-down');
+        return { vote: art.dataset.vote, down: art.querySelector('.postvote-dislike-count')?.textContent, textHeight: art.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? 0, mine: mine ? getComputedStyle(mine).color : null };
+      }, victim);
+      check('pane: ▼ goes out through the site\'s own handler, and its answer folds the post', sent.length === 1 && sent[0].startsWith(`no=${victim}&vote=down`) && folded.vote === 'collapsed' && folded.down === '9' && folded.textHeight === 0, JSON.stringify({ sent, ...folded }));
+      check('pane: your own vote shows in the site\'s colour', folded.mine === 'rgb(41, 128, 185)', JSON.stringify({ mine: folded.mine }));
+      await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .kr-fold-toggle`).click();
+      check('pane: 展開 opens a folded post', await vp.evaluate((no) => document.querySelector(`.kr-pane .kr-post[data-no="${no}"] .kr-post-text`)?.getBoundingClientRect().height > 0, victim));
+    } else {
+      console.log('UNVERIFIABLE  ▼ in the pane: the thread the test opened has no reply left in sight to vote on');
+      code = 2;
+    }
     await vp.locator('.kr-pane-close').click();
     // a post held for review: on the live page the site has swapped its text, slot and all, for its notice (postvote.js
     // applyState). The pane's first draw, from that row, shows the notice; the thread page is held back meanwhile.
@@ -864,6 +931,46 @@ try {
       };
     });
     check('board: pager links are pills; the footer links, credits, notice and counter are all still there', foot.pills && foot.bottom === 4 && foot.credits && foot.notice && foot.flag, JSON.stringify(foot));
+    // the site's ads stay, as a card above the list marked 廣告. Headless is served no banner, so both of 綜合's slots
+    // (web and phone; the site's own rules pick one by screen) are given what the ad server sends for "no banner", its
+    // counting pixel alone in its beacon_ box, then stand-in banners: a linked image, then a canvas. On a wide screen and
+    // on a phone; and no ad on the page is left outside a card
+    const adsAt = async (width) => {
+      await vp.setViewportSize({ width, height: width > 900 ? 1000 : 852 });
+      await vp.waitForTimeout(300);
+      return vp.evaluate(async () => {
+        const slots = ['web-ad', 'mobile-ad'].map((id) => document.querySelector(`#board-post-transition #${id} ins`));
+        const shown = () => slots.map((ins) => !!ins && getComputedStyle(ins.parentElement).display !== 'none' && ins.parentElement.getBoundingClientRect().height > 0);
+        const put = async (html) => {
+          for (const ins of slots) if (ins) ins.innerHTML = html;
+          await new Promise(requestAnimationFrame);
+          return shown();
+        };
+        const empty = await put('<div id="beacon_test" style="position:absolute;left:0;top:0;visibility:hidden"><img src="https://ra5.komica1.org/ra5/www/delivery/lg.php?bannerid=0" width="0" height="0"></div>');
+        const image = await put('<a href="#"><img width="728" height="90" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>');
+        const canvas = await put('<canvas width="728" height="90"></canvas>');
+        const at = canvas.indexOf(true);
+        const card = slots[at]?.parentElement.getBoundingClientRect();
+        const first = document.querySelector('#threads .thread')?.getBoundingClientRect();
+        const stray = [...document.querySelectorAll('ins.adsbygoogle, ins[data-revive-zoneid]')]
+          .filter((n) => !n.closest('#board-post-transition .board-post-ad') && getComputedStyle(n).display !== 'none' && n.getBoundingClientRect().height > 0).length;
+        return {
+          slots: slots.map(Boolean),
+          empty,
+          image,
+          canvas,
+          label: slots[at] && getComputedStyle(slots[at].parentElement, '::before').content,
+          aboveList: !!card && !!first && card.bottom <= first.top,
+          stray,
+        };
+      });
+    };
+    const wide = await adsAt(1600);
+    const phone = await adsAt(393);
+    await vp.setViewportSize({ width: 1600, height: 1000 });
+    const adsOk = (a, pick) => a.slots.every(Boolean) && !a.empty.some(Boolean) && a.image.join() === pick && a.canvas.join() === pick && a.label === '"廣告"' && a.aboveList && a.stray === 0;
+    check('ads: 綜合\'s banner shows above the list as a card marked 廣告, the one the site picks for a wide screen and for a phone; a slot with no banner is not shown',
+      adsOk(wide, 'true,false') && adsOk(phone, 'false,true'), JSON.stringify({ wide, phone }));
     check('nothing but the mocked votes was sent to the site', stopped.length === 0, JSON.stringify(stopped));
   } else {
     check('votes: the board loaded in a fresh context', false);
