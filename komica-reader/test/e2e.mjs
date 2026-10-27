@@ -16,6 +16,8 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import vm from 'node:vm';
+
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
@@ -25,6 +27,9 @@ const out = process.argv[2] ? path.resolve(process.argv[2]) : null;
 if (out) mkdirSync(out, { recursive: true });
 
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
+const helpers = { module: { exports: {} }, URL };
+vm.runInNewContext(src, helpers);
+const { omittedCount } = helpers.module.exports;
 const wrapped = `if (location.href.startsWith(${JSON.stringify(MATCH)})) {\n${src}\n}`;
 
 const results = [];
@@ -93,18 +98,37 @@ try {
   await page.keyboard.press('Escape');
   check('board: Esc folds it again', (await page.evaluate(() => document.getElementById('postform_main').dataset.krState)) === 'collapsed');
 
-  // --- drawer from "see all replies"
-  const target = await page.evaluate(() => {
-    const btn = document.querySelector('.kr-side-open');
-    return btn ? Number(btn.dataset.res) : null;
+  // --- board master list and docked detail
+  const list = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('#threads .thread')];
+    return cards.map((card) => ({
+      res: Number(card.dataset.no),
+      replies: card.querySelectorAll('.post.reply').length,
+      hidden: [...card.querySelectorAll('.post.reply')].every((reply) => getComputedStyle(reply).display === 'none'),
+      peek: card.classList.contains('kr-peek'),
+      meta: card.querySelectorAll('.kr-meta').length,
+      label: card.querySelector('.kr-meta')?.textContent || '',
+      omitted: card.querySelector('.warn_txt2')?.textContent || '',
+    }));
   });
+  check('board: replies start collapsed in every card', list.length > 0 && list.every((card) => !card.peek && card.hidden), `${list.length} cards`);
+  check('board: every card has one accurate reply count', list.length > 0 && list.every((card) => card.meta === 1 &&
+    (card.replies + omittedCount(card.omitted) ? card.label.includes(`💬 ${card.replies + omittedCount(card.omitted)} 則回應`) : card.label.includes('還沒有回應'))));
+  const initial = await page.evaluate(() => ({
+    md: document.documentElement.classList.contains('kr-md'),
+    docked: document.documentElement.classList.contains('kr-docked'),
+    visible: getComputedStyle(document.querySelector('.kr-drawer')).visibility,
+    empty: document.querySelector('.kr-drawer-empty')?.textContent,
+  }));
+  check('detail: docked and empty before selection', initial.md && initial.docked && initial.visible === 'visible' && initial.empty.includes('點左邊任一串'), JSON.stringify(initial));
+  const target = list.find((card) => card.replies)?.res;
   if (!target) {
-    console.log('UNVERIFIABLE  no thread on page 1 has hidden replies; nothing to open in the drawer');
+    console.log('UNVERIFIABLE  no thread on page 1 has replies to inspect');
     code = 2;
     throw new Error('stop');
   }
   const urlBefore = page.url();
-  await page.click(`.kr-side-open[data-res="${target}"]`);
+  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
   const frameEl = await page.waitForSelector('iframe[name="kr-drawer"]');
   let frame = await frameEl.contentFrame();
   await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 });
@@ -120,12 +144,20 @@ try {
       bodyMargin: getComputedStyle(document.body).marginRight,
       title: d.querySelector('.kr-drawer-title').textContent,
       newtab: d.querySelector('.kr-drawer-newtab').getAttribute('href'),
-      active: document.querySelector('#threads .thread.kr-active')?.getAttribute('data-no'),
+      active: document.querySelector('#threads .thread.kr-selected')?.getAttribute('data-no'),
     };
   });
   check('drawer: opens on the right, board stays on the left', drawer.open && drawer.right === 1600 && drawer.width >= 380 && drawer.bodyMargin === `${drawer.width}px`, JSON.stringify(drawer));
   check('drawer: titled with the thread, marks it in the list', drawer.title.includes(`No.${target}`) && drawer.newtab === `pixmicat.php?res=${target}` && drawer.active === String(target), drawer.title);
   check('drawer: board page did not navigate', page.url() === urlBefore, page.url());
+  check('board: OP quote text selects and loads its thread', drawer.active === String(target) && frame.url().includes(`res=${target}`));
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta button`).click();
+  const peek = await page.evaluate((res) => {
+    const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
+    return card.classList.contains('kr-peek') && [...card.querySelectorAll('.post.reply')].every((reply) => getComputedStyle(reply).display !== 'none');
+  }, target);
+  check('board: peek reveals only that card’s latest replies', peek);
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta button`).click();
   const inside = await frame.evaluate(() => ({
     embed: document.documentElement.classList.contains('kr-embed'),
     headerHidden: getComputedStyle(document.getElementById('header')).display === 'none',
@@ -166,14 +198,14 @@ try {
   const left = await page
     .waitForFunction((t) => !document.querySelector('.kr-drawer-title').textContent.includes(`No.${t}`), target, { timeout: 20000 })
     .then(() => true, () => false);
-  await page.click(`.kr-side-open[data-res="${target}"]`);
+  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
   const back = await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 }).then(() => true, () => false);
   check('drawer: after browsing off the thread inside it, opening that thread again reloads it', left && back, JSON.stringify({ left, back, url: frame.url() }));
   await frame.waitForSelector('#postform_main.kr-composer.kr-reply', { timeout: 20000 }).catch(() => null);
 
   await frame.press('body', 'Escape');
   await page.waitForTimeout(200);
-  check('drawer: Esc again closes the drawer', !(await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open'))));
+  check('drawer: Esc clears selection and restores the empty dock', await page.evaluate(() => !document.documentElement.classList.contains('kr-drawer-open') && document.documentElement.classList.contains('kr-docked') && !document.querySelector('.kr-selected')));
 
   // --- No. on the board opens that thread in the drawer with the quote ready
   const boardReply = await page.evaluate(() => {
@@ -181,6 +213,7 @@ try {
     return p ? { no: Number(p.dataset.no), op: Number(p.closest('.thread').dataset.no) } : null;
   });
   if (boardReply) {
+    await page.locator(`#threads .thread[data-no="${boardReply.op}"] .kr-meta button`).click();
     await page.click(`#r${boardReply.no} .post-head .qlink`);
     frame = await (await page.waitForSelector('iframe[name="kr-drawer"]')).contentFrame();
     await frame.waitForURL(new RegExp(`res=${boardReply.op}`), { timeout: 30000 });
@@ -206,6 +239,43 @@ try {
     frame = await (await page.waitForSelector('iframe[name="kr-drawer"]')).contentFrame();
     const ok = await frame.waitForURL(new RegExp(`res=${res}`), { timeout: 30000 }).then(() => true, () => false);
     check('board: [回應] opens the thread in the drawer instead of leaving the board', ok && page.url() === urlBefore, `res=${res}`);
+  }
+
+  await page.locator('.kr-drawer-close').click();
+  await page.keyboard.press('j');
+  const keyboardRes = await page.evaluate(() => document.querySelector('#threads .thread.kr-selected')?.dataset.no);
+  // the pane only starts loading 250 ms after the last j; the frame URL changes when that navigation commits
+  const keyboardLoaded = !!keyboardRes && (await frame.waitForURL(new RegExp(`res=${keyboardRes}`), { timeout: 30000 }).then(() => true, () => false));
+  check('board: j selects the next card and loads it after debounce', keyboardLoaded, `res=${keyboardRes} frame=${frame.url()}`);
+  await page.locator('.kr-drawer-close').click();
+  check('detail: × clears selection but leaves dock visible', await page.evaluate(() => !document.querySelector('.kr-selected') && document.documentElement.classList.contains('kr-docked') && getComputedStyle(document.querySelector('.kr-drawer')).visibility === 'visible'));
+
+  await page.setViewportSize({ width: 800, height: 900 });
+  // leaving the docked layout, the pane slides out over its .18 s transition
+  await page.waitForTimeout(400);
+  const mobileBefore = await page.evaluate(() => ({
+    docked: document.documentElement.classList.contains('kr-docked'),
+    visibility: getComputedStyle(document.querySelector('.kr-drawer')).visibility,
+  }));
+  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+  await page.waitForTimeout(300);
+  const mobileOpen = await page.evaluate(() => {
+    const r = document.querySelector('.kr-drawer').getBoundingClientRect();
+    return { open: document.documentElement.classList.contains('kr-drawer-open'), width: Math.round(r.width), left: Math.round(r.left), innerWidth };
+  });
+  await page.locator('.kr-drawer-back').click();
+  const mobileClosed = !(await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open')));
+  check(
+    'mobile: card opens full-width overlay and ‹ 列表 closes it',
+    !mobileBefore.docked && mobileBefore.visibility === 'hidden' && mobileOpen.open && mobileOpen.left === 0 && mobileOpen.width >= mobileOpen.innerWidth - 20 && mobileClosed,
+    JSON.stringify({ mobileBefore, mobileOpen, mobileClosed }),
+  );
+  if (out) {
+    await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: path.join(out, '6-mobile-detail.png') });
+    await page.locator('.kr-drawer-back').click();
+    await page.screenshot({ path: path.join(out, '5-mobile-list.png') });
   }
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));

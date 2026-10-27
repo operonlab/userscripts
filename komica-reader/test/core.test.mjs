@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -89,4 +89,26 @@ test('the drawer takes the first solid background, skipping transparent ones', (
   assert.equal(opaqueColor(['rgba(0, 0, 0, 0)', 'rgb(255, 255, 238)'], '#fff'), 'rgb(255, 255, 238)');
   assert.equal(opaqueColor(['rgb(34 34 34 / 100%)'], '#fff'), 'rgb(34, 34, 34)');
   assert.equal(opaqueColor(['transparent', 'rgba(10, 10, 10, 0.2)'], '#fff'), '#fff');
+});
+
+test('omitted reply count survives the site replacing its tail', () => {
+  assert.equal(omittedCount('有回應 25 篇被省略。要閱讀所有回應請按下回應連結。'), 25);
+  assert.equal(omittedCount('有回應 25 篇被省略。[展開]'), 25);
+  assert.equal(omittedCount('沒有省略回應'), 0);
+});
+
+test('reply time is short on the local day and dated otherwise', () => {
+  const today = new Date(2026, 9, 26, 14);
+  assert.equal(shortTime('2026/10/26(一) 13:16:28.456 ID:Nd4bZo6w', today), '13:16');
+  assert.equal(shortTime('2026/10/25(日) 09:08:00.000 ID:x', today), '10/25 09:08');
+  assert.equal(shortTime('2026/02/30(一) 13:16:28.456', today), null);
+  assert.equal(shortTime('not a timestamp', today), null);
+});
+
+test('thread navigation clamps and handles no selection or no cards', () => {
+  assert.equal(stepIndex(-1, 1, 3), 0);
+  assert.equal(stepIndex(0, -1, 3), 0);
+  assert.equal(stepIndex(2, 1, 3), 2);
+  assert.equal(stepIndex(1, -1, 3), 0);
+  assert.equal(stepIndex(-1, 1, 0), -1);
 });

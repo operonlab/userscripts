@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.1.0
+// @version      0.2.0
 // @description  Komica (gaia /00b/): a thread's replies open in a drawer beside the board, and the post form floats where you are instead of sitting at the top of the page. Uses the site's own pages and form.
 // @description:zh-TW  K島綜合版：討論串的回應在右側抽屜展開、版面留在左邊；發文／回文表單浮在畫面上跟著你捲動，不用再捲回最上面。沿用站方自己的頁面與表單。
 // @author       operonlab
@@ -64,6 +64,25 @@
     return loading === null || res === loading;
   }
 
+  function omittedCount(text) {
+    const match = /有回應\s+(\d+)\s+篇被省略/.exec(String(text));
+    return match ? Number(match[1]) : 0;
+  }
+
+  function shortTime(nowText, today) {
+    const match = /^(\d{4})\/(\d{1,2})\/(\d{1,2})\([^)]*\)\s+(\d{2}):(\d{2}):\d{2}/.exec(String(nowText).trim());
+    if (!match) return null;
+    const [, year, month, day, hour, minute] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+    if (date.getFullYear() !== Number(year) || date.getMonth() + 1 !== Number(month) || date.getDate() !== Number(day)) return null;
+    const time = `${hour}:${minute}`;
+    return date.toDateString() === today.toDateString() ? time : `${month.padStart(2, '0')}/${day.padStart(2, '0')} ${time}`;
+  }
+
+  function stepIndex(current, delta, length) {
+    return length ? Math.max(0, Math.min(length - 1, current + delta)) : -1;
+  }
+
   // first non-transparent `rgb()/rgba()` among computed backgrounds, so the drawer matches the site theme
   function opaqueColor(colors, fallback) {
     for (const c of colors) {
@@ -76,7 +95,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -94,18 +113,23 @@
   let root = null;
 
   const CSS = `
-html.kr { --kr-bg: #fff; --kr-line: color-mix(in srgb, currentColor 16%, transparent); --kr-drawer-w: 560px; }
+html.kr { --kr-bg: #fff; --kr-line: color-mix(in srgb, currentColor 16%, transparent); --kr-drawer-w: 560px; --kr-side: 0px; }
 html.kr body { font-family: system-ui, -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
 html.kr #threads .quote { font-size: 15px; line-height: 1.75; }
 html.kr #threads .thread { max-width: 1100px; margin: 0 auto 18px; padding: 12px 16px 14px; border: 1px solid var(--kr-line);
   border-radius: 14px; background: color-mix(in srgb, currentColor 3%, transparent); }
 html.kr #threads .thread > hr { display: none; }
-html.kr #threads .thread.kr-active { outline: 2px solid color-mix(in srgb, currentColor 45%, transparent); outline-offset: 2px; }
+html.kr #threads .thread.kr-selected { outline: 2px solid color-mix(in srgb, currentColor 45%, transparent); outline-offset: 2px; }
 html.kr #threads .post.reply { border-radius: 10px; padding: 6px 12px; max-width: calc(100% - 24px); box-sizing: border-box; }
 html.kr #threads .post-head { line-height: 1.6; }
-html.kr .kr-side-open { margin-left: 8px; padding: 2px 10px; border: 1px solid var(--kr-line); border-radius: 999px;
-  background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
-html.kr .kr-side-open:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+html.kr-md #threads .thread { cursor: pointer; }
+html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
+html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+html.kr-md #threads .threadpost .file-thumb img { max-width: 160px; height: auto; }
+html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end { display: none !important; }
+html.kr-md #toplink { font-size: 12px; }
+html.kr-md .kr-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; opacity: .8; }
+html.kr-md .kr-meta button { border: 0; padding: 2px 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
 
 /* the site's form, floating; collapsed it is a pill (board) or a bar (thread) */
 html.kr .kr-composer { position: fixed; z-index: 9001; right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px));
@@ -139,8 +163,9 @@ html.kr .kr-drawer { position: fixed; z-index: 9000; top: 0; right: 0; bottom: 0
   flex-direction: column; box-sizing: border-box; background: var(--kr-bg); color: inherit; border-left: 1px solid var(--kr-line);
   box-shadow: -10px 0 30px rgba(0, 0, 0, .14); transform: translateX(100%); visibility: hidden; transition: transform .18s ease, visibility .18s; }
 html.kr.kr-drawer-open .kr-drawer { transform: none; visibility: visible; }
-html.kr.kr-drawer-open body { margin-right: var(--kr-drawer-w); }
-html.kr.kr-drawer-open .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
+html.kr-docked .kr-drawer { transform: none; visibility: visible; transition: none; }
+html.kr-docked body { margin-left: var(--kr-side); margin-right: var(--kr-drawer-w); }
+html.kr-docked .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
 html.kr .kr-drawer-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--kr-line); font-size: 14px; }
 html.kr .kr-drawer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 15px; }
 html.kr .kr-drawer-head a, html.kr .kr-drawer-head button { flex: none; padding: 4px 10px; border: 1px solid var(--kr-line); border-radius: 8px;
@@ -148,12 +173,22 @@ html.kr .kr-drawer-head a, html.kr .kr-drawer-head button { flex: none; padding:
 html.kr .kr-drawer-head .kr-drawer-close { width: 34px; padding: 4px 0; border: 0; font-size: 20px; line-height: 1; }
 html.kr .kr-drawer-head a:hover, html.kr .kr-drawer-head button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 html.kr .kr-drawer-frame { flex: 1; width: 100%; border: 0; background: var(--kr-bg); }
+html.kr-md .kr-drawer-frame { display: none; }
+html.kr-md.kr-drawer-open .kr-drawer-frame { display: block; }
+html.kr .kr-drawer-empty { flex: 1; display: grid; align-content: center; gap: 12px; padding: 24px; text-align: center; }
+html.kr .kr-drawer-empty small { opacity: .65; }
+html.kr.kr-drawer-open .kr-drawer-empty { display: none; }
+html.kr .kr-drawer-back { display: none; }
+html.kr-md:not(.kr-drawer-open) .kr-drawer-reload, html.kr-md:not(.kr-drawer-open) .kr-drawer-newtab { display: none; }
 html.kr .kr-drawer-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
 html.kr.kr-resizing, html.kr.kr-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.kr.kr-resizing .kr-drawer-frame { pointer-events: none; }
 @media (max-width: 899px) {
   html.kr .kr-drawer { width: 100vw; }
-  html.kr.kr-drawer-open body { margin-right: 0; overflow: hidden; }
+  html.kr-md.kr-drawer-open body { overflow: hidden; }
+  html.kr-md.kr-drawer-open .kr-composer.kr-new { right: 16px; }
+  html.kr-md .kr-drawer-back { display: block; }
+  html.kr-md .kr-drawer-close { display: none; }
   html.kr .kr-drawer-resize { display: none; }
 }
 
@@ -297,13 +332,16 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     const drawer = el('aside', { class: 'kr-drawer', 'aria-label': '討論串' });
     const resize = el('div', { class: 'kr-drawer-resize', title: '拖曳調整寬度' });
     const head = el('header', { class: 'kr-drawer-head' });
+    const back = el('button', { type: 'button', class: 'kr-drawer-back' }, '‹ 列表');
     const title = el('span', { class: 'kr-drawer-title' });
     const newtab = el('a', { class: 'kr-drawer-newtab', target: '_blank', rel: 'noopener' }, '新分頁');
     const reload = el('button', { type: 'button', class: 'kr-drawer-reload', title: '重新載入這串' }, '重新整理');
     const close = el('button', { type: 'button', class: 'kr-drawer-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
     const frame = el('iframe', { class: 'kr-drawer-frame', name: FRAME_NAME, title: '討論串內容' });
-    head.append(title, newtab, reload, close);
-    drawer.append(resize, head, frame);
+    const empty = el('div', { class: 'kr-drawer-empty' });
+    empty.append(el('span', {}, '← 點左邊任一串，在這裡看全部回應'), el('small', {}, 'j／k 上下切換 · Enter 開啟 · Esc 取消選取'));
+    head.append(back, title, newtab, reload, close);
+    drawer.append(resize, head, frame, empty);
     document.body.appendChild(drawer);
 
     const d = (state.drawer = { el: drawer, frame, title, newtab, res: null, loading: null, ready: false, pending: [] });
@@ -314,7 +352,10 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     } catch {
       width = null;
     }
-    const applyWidth = () => root.style.setProperty('--kr-drawer-w', `${clampWidth(width, window.innerWidth)}px`);
+    const applyWidth = () => {
+      root.style.setProperty('--kr-drawer-w', `${clampWidth(width, window.innerWidth)}px`);
+      root.classList.toggle('kr-docked', window.innerWidth >= 900);
+    };
     applyWidth();
     window.addEventListener('resize', applyWidth);
 
@@ -342,6 +383,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     });
 
     close.addEventListener('click', closeDrawer);
+    back.addEventListener('click', closeDrawer);
     reload.addEventListener('click', () => {
       d.ready = false;
       try {
@@ -396,7 +438,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     }
     if (same && same.origin === location.origin) d.newtab.href = same.href;
     else d.newtab.removeAttribute('href');
-    for (const n of document.querySelectorAll('#threads .thread.kr-active')) n.classList.remove('kr-active');
+    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
   }
 
   function setThread(res, titleText) {
@@ -406,8 +448,8 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     const t = (titleText || listTitle || '').trim();
     d.title.textContent = t && t !== '無題' ? `${t}　No.${res}` : `No.${res}`;
     d.newtab.href = `pixmicat.php?res=${res}`;
-    for (const n of document.querySelectorAll('#threads .thread.kr-active')) n.classList.remove('kr-active');
-    document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-active');
+    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
+    document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-selected');
   }
 
   function sendToFrame(msg) {
@@ -419,6 +461,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
   function openDrawer(res, { post = null, quote = null } = {}) {
     const d = state.drawer;
     if (!d) return;
+    clearTimeout(openTimer);
     if (d.res !== res) {
       d.loading = res;
       d.ready = false;
@@ -433,9 +476,10 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
 
   function closeDrawer() {
     const d = state.drawer;
-    if (!d || !root.classList.contains('kr-drawer-open')) return;
+    if (!d) return;
+    clearTimeout(openTimer);
     root.classList.remove('kr-drawer-open');
-    for (const n of document.querySelectorAll('#threads .thread.kr-active')) n.classList.remove('kr-active');
+    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
     // blank the frame so a playing video in it stops
     d.frame.src = 'about:blank';
     d.res = null;
@@ -444,45 +488,63 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     d.pending = [];
   }
 
-  // an "open beside" button under every thread whose replies are cut short on the board page
+  let openTimer = null;
+
   function decorateThreads(scope) {
-    for (const warn of scope.querySelectorAll('#threads .threadpost .warn_txt2')) {
-      if (warn.dataset.krDone) continue;
-      warn.dataset.krDone = '1';
-      const res = Number(warn.closest('.thread')?.getAttribute('data-no'));
-      if (!res) continue;
-      const btn = el('button', { type: 'button', class: 'kr-side-open', 'data-res': String(res) }, '在側邊看全部回應 ▸');
-      warn.after(btn);
+    for (const card of scope.querySelectorAll('#threads .thread')) {
+      const replies = card.querySelectorAll('.post.reply');
+      const total = replies.length + omittedCount(card.querySelector('.warn_txt2')?.textContent || '');
+      const time = replies.length ? shortTime(replies[replies.length - 1].querySelector('.now')?.textContent || '', new Date()) : null;
+      const label = total ? `💬 ${total} 則回應${time ? ` · 最後 ${time}` : ''}` : '還沒有回應';
+      let meta = card.querySelector('.kr-meta');
+      if (!meta) {
+        meta = el('div', { class: 'kr-meta' });
+        meta.append(el('span'));
+        card.append(meta);
+      }
+      if (meta.firstChild.textContent !== label) meta.firstChild.textContent = label;
+      let peek = meta.querySelector('button');
+      if (replies.length && !peek) {
+        peek = el('button', { type: 'button' });
+        peek.addEventListener('click', () => {
+          card.classList.toggle('kr-peek');
+          peek.textContent = card.classList.contains('kr-peek') ? '收起 ▴' : `展開最新 ${card.querySelectorAll('.post.reply').length} 則 ▾`;
+        });
+        meta.append(peek);
+      }
+      if (peek && !replies.length) peek.remove();
+      else if (peek && !card.classList.contains('kr-peek') && peek.textContent !== `展開最新 ${replies.length} 則 ▾`) peek.textContent = `展開最新 ${replies.length} 則 ▾`;
     }
   }
 
   function initTop() {
+    root.classList.add('kr-md');
     setupDrawer();
     decorateThreads(document);
     const threads = document.getElementById('threads');
-    if (threads) new MutationObserver(() => decorateThreads(document)).observe(threads, { childList: true });
+    if (threads) new MutationObserver(() => decorateThreads(document)).observe(threads, { childList: true, subtree: true });
 
     window.addEventListener(
       'click',
       (e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        const btn = e.target.closest?.('.kr-side-open');
-        if (btn) {
-          e.preventDefault();
-          openDrawer(Number(btn.dataset.res));
-          return;
-        }
         if (!e.target.closest?.('#threads')) return;
         // on a thread page the No. quotes into this page's own form (see init)
         if (!composer.resto) onHeadNumber(e, (no, op) => openDrawer(op, { quote: no }));
         if (e.defaultPrevented) return;
         const a = e.target.closest('a[href]');
-        if (!a || (a.target && a.target !== '_self')) return;
-        const link = threadLink(a.getAttribute('href'), location.href);
-        if (!link || String(link.res) === composer.resto) return;
-        e.preventDefault();
-        e.stopPropagation();
-        openDrawer(link.res, { post: link.post });
+        if (a && (!a.target || a.target === '_self')) {
+          const link = threadLink(a.getAttribute('href'), location.href);
+          if (link) {
+            e.preventDefault();
+            e.stopPropagation();
+            openDrawer(link.res, { post: link.post });
+            return;
+          }
+        }
+        if (e.target.closest('a, button, input, label, textarea, select, summary, video, .file-thumb, .postvote-slot, .post-menu-toggle, .qlink')) return;
+        const card = e.target.closest('#threads .thread[data-no]');
+        if (card) openDrawer(Number(card.dataset.no));
       },
       true,
     );
@@ -505,14 +567,36 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
   }
 
   function onKey(e) {
-    if (e.key !== 'Escape' || e.isComposing) return;
+    if (e.isComposing || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const { form } = composer;
-    if (form && form.dataset.krState === 'expanded' && form.contains(document.activeElement)) {
+    if (e.key === 'Escape' && form && form.dataset.krState === 'expanded') {
       collapse();
       return;
     }
-    if (embedded) window.parent.postMessage({ kr: 'close' }, location.origin);
-    else closeDrawer();
+    if (e.key === 'Escape') {
+      if (embedded) window.parent.postMessage({ kr: 'close' }, location.origin);
+      else closeDrawer();
+      return;
+    }
+    if (!root.classList.contains('kr-md') || e.target.closest?.('input, textarea, select, [contenteditable]') || e.target.isContentEditable) return;
+    const cards = [...document.querySelectorAll('#threads .thread[data-no]')];
+    if (e.key === 'j' || e.key === 'k') {
+      const current = cards.findIndex((card) => card.classList.contains('kr-selected'));
+      const next = stepIndex(current, e.key === 'j' ? 1 : -1, cards.length);
+      if (next < 0) return;
+      e.preventDefault();
+      for (const card of cards) card.classList.remove('kr-selected');
+      cards[next].classList.add('kr-selected');
+      cards[next].scrollIntoView({ block: 'nearest' });
+      clearTimeout(openTimer);
+      openTimer = setTimeout(() => openDrawer(Number(cards[next].dataset.no)), 250);
+    } else if (e.key === 'Enter' || e.key === 'o') {
+      const card = document.querySelector('#threads .thread.kr-selected');
+      if (card) {
+        e.preventDefault();
+        openDrawer(Number(card.dataset.no));
+      }
+    }
   }
 
   function init() {
@@ -521,7 +605,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     if (composer.resto) window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
     document.addEventListener('keydown', onKey);
     if (embedded) initEmbed();
-    else initTop();
+    else if (document.getElementById('threads') && !document.querySelector('#postform_main input[name="resto"]')) initTop();
   }
 
   function start() {
