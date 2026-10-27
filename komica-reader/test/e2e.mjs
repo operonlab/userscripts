@@ -1,7 +1,7 @@
 // End-to-end check against the live board, in headless Chromium.
 //
 // The script is added as an init script (main world, every frame, before the site's own scripts),
-// which is where Tampermonkey puts a `@grant none` document-start script; frames outside the
+// which tests the UI without Tampermonkey; frames outside the
 // @match are skipped by the wrapper, as the manager would skip them.
 //
 // Nothing is ever submitted: posting to a public board is not a test step. The checks stop at
@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
-const MATCH = 'https://gaia.komica1.org/00b/';
+const MATCHES = ['https://gaia.komica1.org/00b/', 'https://komica1.org/'];
 const out = process.argv[2] ? path.resolve(process.argv[2]) : null;
 if (out) mkdirSync(out, { recursive: true });
 
@@ -30,7 +30,7 @@ const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), '
 const helpers = { module: { exports: {} }, URL };
 vm.runInNewContext(src, helpers);
 const { omittedCount } = helpers.module.exports;
-const wrapped = `if (location.href.startsWith(${JSON.stringify(MATCH)})) {\n${src}\n}`;
+const wrapped = `if (${JSON.stringify(MATCHES)}.some((prefix) => location.href.startsWith(prefix))) {\n${src}\n}`;
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -128,8 +128,8 @@ try {
     throw new Error('stop');
   }
   const urlBefore = page.url();
-  // x past the floated 88px thumbnail, so the click lands on the text, not the image
-  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 130, y: 5 } });
+  // a plain, non-link spot of the card: OP text may start with a URL or >>No., which are links and rightly not card clicks
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
   const frameEl = await page.waitForSelector('iframe[name="kr-drawer"]');
   let frame = await frameEl.contentFrame();
   await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 });
@@ -151,7 +151,7 @@ try {
   check('drawer: opens on the right, board stays on the left', drawer.open && drawer.right === 1600 && drawer.width >= 380 && drawer.bodyMargin === `${drawer.width}px`, JSON.stringify(drawer));
   check('drawer: titled with the thread, marks it in the list', drawer.title.includes(`No.${target}`) && drawer.newtab === `pixmicat.php?res=${target}` && drawer.active === String(target), drawer.title);
   check('drawer: board page did not navigate', page.url() === urlBefore, page.url());
-  check('board: OP quote text selects and loads its thread', drawer.active === String(target) && frame.url().includes(`res=${target}`));
+  check('board: clicking a card selects and loads its thread', drawer.active === String(target) && frame.url().includes(`res=${target}`));
   await page.locator(`#threads .thread[data-no="${target}"] .kr-meta button`).click();
   const peek = await page.evaluate((res) => {
     const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
@@ -203,7 +203,7 @@ try {
   // the <a class="file-thumb"> has a 0×0 inline box; what a reader hits is its <img>
   const thumbSel = `#threads .thread[data-no="${target}"] .threadpost .file-thumb img`;
   const viaThumb = (await page.locator(thumbSel).count()) > 0;
-  await page.locator(viaThumb ? thumbSel : `#threads .thread[data-no="${target}"] .threadpost .quote`).first().click({ position: { x: viaThumb ? 20 : 130, y: viaThumb ? 20 : 5 } });
+  await (viaThumb ? page.locator(thumbSel).first().click({ position: { x: 20, y: 20 } }) : page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click());
   const back = await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 }).then(() => true, () => false);
   const expandedInList = await page.evaluate((t) => !!document.querySelector(`#threads .thread[data-no="${t}"] .threadpost .-expanded`), target);
   check('drawer: after browsing off the thread inside it, opening that thread again reloads it', left && back, JSON.stringify({ left, back, url: frame.url() }));
@@ -265,7 +265,7 @@ try {
     docked: document.documentElement.classList.contains('kr-docked'),
     visibility: getComputedStyle(document.querySelector('.kr-drawer')).visibility,
   }));
-  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
   await page.waitForTimeout(300);
   const mobileOpen = await page.evaluate(() => {
     const r = document.querySelector('.kr-drawer').getBoundingClientRect();
@@ -279,11 +279,86 @@ try {
     JSON.stringify({ mobileBefore, mobileOpen, mobileClosed }),
   );
   if (out) {
-    await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+    await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
     await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(out, '6-mobile-detail.png') });
     await page.locator('.kr-drawer-back').click();
     await page.screenshot({ path: path.join(out, '5-mobile-list.png') });
+  }
+
+  const mobileSide = await page.evaluate(() => ({
+    hidden: getComputedStyle(document.querySelector('.kr-side')).display === 'none',
+    width: document.documentElement.style.getPropertyValue('--kr-side'),
+  }));
+  check('mobile: sidebar starts hidden without reserving list width', mobileSide.hidden && mobileSide.width === '0px', JSON.stringify(mobileSide));
+  await page.locator('.kr-side-open').click();
+  check('mobile: ☰ opens the sidebar over the list', await page.evaluate(() => {
+    const side = document.querySelector('.kr-side');
+    return getComputedStyle(side).display !== 'none' && document.documentElement.style.getPropertyValue('--kr-side') === '0px';
+  }));
+  await page.keyboard.press('Escape');
+  check('mobile: Esc closes the sidebar', await page.evaluate(() => getComputedStyle(document.querySelector('.kr-side')).display === 'none'));
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  // the resize event (and the layout switch it drives) fires after setViewportSize resolves
+  await page.waitForFunction(() => innerWidth === 1600);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const desktopSide = await page.evaluate(() => ({
+    visible: getComputedStyle(document.querySelector('.kr-side')).display !== 'none',
+    width: document.documentElement.style.getPropertyValue('--kr-side'),
+    margin: getComputedStyle(document.body).marginLeft,
+    current: !!document.querySelector('.kr-side-row a[aria-current="page"][href="https://gaia.komica1.org/00b/index.htm"]'),
+  }));
+  check('desktop: sidebar takes 248px and highlights 綜合', desktopSide.visible && desktopSide.width === '248px' && desktopSide.margin === '248px' && desktopSide.current, JSON.stringify(desktopSide));
+  const adult = await page.evaluate(() => {
+    const toggle = [...document.querySelectorAll('.kr-side-group-toggle')].find((b) => b.textContent.includes('18禁'));
+    return toggle ? { expanded: toggle.getAttribute('aria-expanded'), rows: toggle.parentElement.querySelectorAll('.kr-side-row').length, text: toggle.textContent } : null;
+  });
+  check('sidebar: the 18禁 section starts folded, as the site keeps it locked', !!adult && adult.expanded === 'false' && adult.rows === 0 && !adult.text.includes('[鎖定]'), JSON.stringify(adult));
+
+  await page.locator('.kr-side-search').fill('動畫');
+  const searchResult = await page.evaluate(() => {
+    const links = [...document.querySelectorAll('.kr-side-list .kr-side-row a')];
+    return { animation: links.some((a) => a.href.includes('/00b/pixmicat2.php?c=') && a.textContent === '動畫'), unrelated: links.some((a) => a.textContent === '綜合') };
+  });
+  check('sidebar: search finds the 動畫 category view and hides 綜合', searchResult.animation && !searchResult.unrelated, JSON.stringify(searchResult));
+  await page.locator('.kr-side-search').fill('');
+  await page.locator('.kr-side-row:has(a[href="https://gaia.komica1.org/00b/index.htm"]) .kr-side-star').first().click();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.kr-side');
+  check('sidebar: starred board survives reload under ★ 書籤', await page.evaluate(() => {
+    const first = document.querySelector('.kr-side-group');
+    return first?.textContent.includes('★ 書籤') && !!first.querySelector('a[href="https://gaia.komica1.org/00b/index.htm"]');
+  }));
+  await page.locator('.kr-side-close').click();
+  check('sidebar: collapse releases its 248px', await page.evaluate(() => document.documentElement.style.getPropertyValue('--kr-side') === '0px'));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.kr-side-open');
+  check('sidebar: collapsed state survives reload', await page.evaluate(() => document.documentElement.style.getPropertyValue('--kr-side') === '0px' && getComputedStyle(document.querySelector('.kr-side')).display === 'none'));
+  await page.locator('.kr-side-open').click();
+  check('sidebar: ☰ restores the 248px column', await page.evaluate(() => document.documentElement.style.getPropertyValue('--kr-side') === '248px'));
+
+  const portalResp = await page.goto('https://komica1.org/', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch((e) => e);
+  if (!portalResp || portalResp instanceof Error || !portalResp.ok()) {
+    check('portal: entry loads', false, portalResp instanceof Error ? portalResp.message : String(portalResp?.status()));
+  } else {
+    let menu = null;
+    for (let i = 0; i < 40 && !menu; i++) {
+      menu = page.frame({ name: 'menu' });
+      if (!menu) await page.waitForTimeout(250);
+    }
+    const menuSide = menu ? await menu.waitForSelector('.kr-side', { timeout: 20000 }).then(() => true, () => false) : false;
+    const portal = { ...(await page.evaluate(() => ({ cols: document.querySelector('frameset')?.cols }))), menu: menuSide };
+    check('portal: menu frame has sidebar and frameset starts at 248px', portal.menu && portal.cols?.startsWith('248,'), JSON.stringify(portal));
+    await menu.locator('.kr-side-row a[href="https://gaia.komica1.org/00b/index.htm"]').first().click();
+    const cont = page.frame({ name: 'cont' });
+    await cont.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 });
+    await cont.waitForSelector('html.kr-md', { timeout: 20000 });
+    check('portal: 綜合 opens in cont with master detail and no sidebar', await cont.evaluate(() => document.documentElement.classList.contains('kr-md') && !document.querySelector('.kr-side')));
+    if (out) {
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: path.join(out, '7-portal.png') });
+    }
   }
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));

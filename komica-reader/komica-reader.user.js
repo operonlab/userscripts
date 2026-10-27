@@ -2,9 +2,9 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.2.0
-// @description  Komica (gaia /00b/): a thread's replies open in a drawer beside the board, and the post form floats where you are instead of sitting at the top of the page. Uses the site's own pages and form.
-// @description:zh-TW  K島綜合版：討論串的回應在右側抽屜展開、版面留在左邊；發文／回文表單浮在畫面上跟著你捲動，不用再捲回最上面。沿用站方自己的頁面與表單。
+// @version      0.3.0
+// @description  Board navigation on Komica's portal and gaia /00b/, with a master-detail thread view and floating post form.
+// @description:zh-TW  K島入口與綜合版側欄導覽、討論串分欄閱讀，以及跟著捲動的發文／回文表單。
 // @author       operonlab
 // @license      MIT
 // @homepageURL  https://github.com/operonlab/userscripts/tree/main/komica-reader
@@ -12,8 +12,10 @@
 // @updateURL    https://raw.githubusercontent.com/operonlab/userscripts/main/komica-reader/komica-reader.user.js
 // @downloadURL  https://raw.githubusercontent.com/operonlab/userscripts/main/komica-reader/komica-reader.user.js
 // @match        https://gaia.komica1.org/00b/*
+// @match        https://komica1.org/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 (() => {
@@ -25,6 +27,275 @@
   const MAX_W = 1000;
   // the board list keeps at least this much room beside the drawer
   const LIST_MIN = 360;
+
+  // <boards>
+  const BOARDS_AT = '2026-10-27';
+  const BOARDS = [
+    { c: '連線板', l: '2CAT', u: 'https://2cat.komica1.org/', s: 'down' },
+    { c: '連線板', l: '貓管理部', u: 'https://2cat.komica1.org/0d/fstyle.html', s: 'down' },
+    { c: '連線板', l: '站務公告', u: 'https://komica.blogspot.com/', s: 'ok' },
+    { c: '連線板', l: '動畫', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB', s: 'ok' },
+    { c: '連線板', l: '漫畫', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%BC%AB%E7%95%AB', s: 'ok' },
+    { c: '連線板', l: '影視', u: 'https://www.akraft.net/service/66a6eca2bfccee3f04a52bc4', s: 'ok' },
+    { c: '連線板', l: '綜合', u: 'https://gaia.komica1.org/00b/index.htm', s: 'ok' },
+    { c: '連線板', l: '掛圖', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%8E%9B%E5%9C%96', s: 'ok' },
+    { c: '連線板', l: '新聞', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%96%B0%E8%81%9E', s: 'ok' },
+    { c: '連線板', l: '政治', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%94%BF%E6%B2%BB', s: 'ok' },
+    { c: '連線板', l: '氣象', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%B0%A3%E8%B1%A1', s: 'ok' },
+    { c: '連線板', l: '新番捏他', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%96%B0%E7%95%AA%E6%8D%8F%E4%BB%96', s: 'ok' },
+    { c: '連線板', l: '新番實況', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%96%B0%E7%95%AA%E5%AF%A6%E6%B3%81', s: 'ok' },
+    { c: '連線板', l: '模型', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%A8%A1%E5%9E%8B', s: 'ok' },
+    { c: '連線板', l: 'Figure/GK', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=Figure', s: 'ok' },
+    { c: '連線板', l: '玩偶', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E7%8E%A9%E5%81%B6', s: 'ok' },
+    { c: '連線板', l: '螢幕攝', u: 'https://pixmicat.alica.idv.tw/screenshot/', s: 'down' },
+    { c: '連線板', l: '歡樂惡搞', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E6%AD%A1%E6%A8%82%E6%83%A1%E6%90%9E', s: 'ok' },
+    { c: '連線板', l: '特攝', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E7%89%B9%E6%94%9D', s: 'ok' },
+    { c: '連線板', l: '祭典', u: 'http://rthost.win/sd/', s: 'ok' },
+    { c: '連線板', l: '蘿蔔', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E8%98%BF%E8%94%94', s: 'ok' },
+    { c: '連線板', l: '攝影', u: 'https://grea.komica1.org/50/index.htm', s: 'down' },
+    { c: '連線板', l: '軍武', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E8%BB%8D%E6%AD%A6', s: 'ok' },
+    { c: '連線板', l: '車', u: 'https://www.gomiga.org/car/', s: 'ok' },
+    { c: '連線板', l: '萌', u: 'https://2cat.komica1.org/~kirur/img2/index.htm', s: 'down' },
+    { c: '連線板', l: '詢問', u: 'https://2cat.komica1.org/~kirur/orz/index.htm', s: 'down' },
+    { c: '連線板', l: 'AA', u: 'http://rthost.win/aa/pbbs.html', s: 'ok' },
+    { c: '連線板', l: 'COSPLAY', u: 'https://selene.zawarudo.org/costumade/', s: 'ok' },
+    { c: '連線板', l: '改造', u: 'https://sora.komica1.org/40/index.htm', s: 'down' },
+    { c: '連線板', l: '投票所', u: 'http://komica.yucie.net/vote/', s: 'down' },
+    { c: '連線板', l: '問答', u: 'http://komica.yucie.net/quiztest/', s: 'down' },
+    { c: '連線板', l: 'UP', u: 'http://rthost.win/komica-up/upload.php', s: 'ok' },
+    { c: '連線二板', l: '數學', u: 'https://grea.komica1.org/75/index.htm', s: 'down' },
+    { c: '連線二板', l: '校園', u: 'https://grea.komica1.org/school/', s: 'down' },
+    { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok' },
+    { c: '連線二板', l: '財經', u: 'https://2cat.org/~finance/', s: 'ok' },
+    { c: '連線二板', l: '生活消費', u: 'http://gzone-anime.info/UnitedSites/shopping/', s: 'ok' },
+    { c: '連線二板', l: '法律', u: 'https://2cat.org/~law/', s: 'ok' },
+    { c: '連線二板', l: '海外', u: 'https://eclair.nagatoyuki.org/outremer/', s: 'ok' },
+    { c: '連線二板', l: '閒談@香港', u: 'https://kagaminerin.org/hongkong/', s: 'down' },
+    { c: '連線二板', l: '藝術', u: 'http://gzone-anime.info/UnitedSites/art/', s: 'ok' },
+    { c: '連線二板', l: '繪師', u: 'https://2cat.org/~artist/', s: 'ok' },
+    { c: '連線二板', l: '交易合購', u: 'https://komica.yucie.net/trade/', s: 'down' },
+    { c: '連線二板', l: '鋼普拉', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%8B%BC%E6%99%AE%E6%8B%89', s: 'ok' },
+    { c: '連線二板', l: '生存遊戲', u: 'https://2cat.komica1.org/~gtr2003/pixmicat1/', s: 'down' },
+    { c: '連線二板', l: '猜謎', u: 'https://2cat.org/~quiz/', s: 'ok' },
+    { c: '連線二板', l: '故事接龍', u: 'https://storysol.boguspix.com/', s: 'ok' },
+    { c: '連線二板', l: '歐美動畫', u: 'https://grea.komica1.org/76/', s: 'down' },
+    { c: '連線二板', l: '大自然', u: 'https://2cat.komica1.org/~rt/pd/', s: 'down' },
+    { c: '連線二板', l: '天文', u: 'https://2cat.org/~astronomy/', s: 'ok' },
+    { c: '連線二板', l: '命理', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%91%BD%E7%90%86', s: 'ok' },
+    { c: '連線二板', l: '戀愛', u: 'https://moecorner.com/iboards/Relationship/', s: 'down' },
+    { c: '連線二板', l: '超常現象', u: 'https://2cat.org/~supernature/', s: 'ok' },
+    { c: '連線二板', l: '夢', u: 'https://grea.komica1.org/dream/', s: 'down' },
+    { c: '連線二板', l: '流言終結', u: 'https://eclair.nagatoyuki.org/myth/', s: 'ok' },
+    { c: '連線二板', l: '旅遊', u: 'https://travel.voidfactory.com/', s: 'ok' },
+    { c: '連線二板', l: '耳機', u: 'https://tomo.komica1.org/77/index.htm', s: 'down' },
+    { c: '連線二板', l: '服飾', u: 'https://2cat.org/~pixmicat/', s: 'ok' },
+    { c: '連線二板', l: '美容', u: 'https://kagaminerin.org/cosmetic/', s: 'down' },
+    { c: '連線二板', l: '圖書', u: 'http://gzone-anime.info/UnitedSites/books/', s: 'ok' },
+    { c: '連線二板', l: '煩惱相談', u: 'https://eclair.nagatoyuki.org/conseil/', s: 'ok' },
+    { c: '連線二板', l: '安價', u: 'https://eclair.nagatoyuki.org/ancre/', s: 'ok' },
+    { c: '影音', l: '短片', u: 'https://2cat.komica1.org/~touhonoob/21d/', s: 'down' },
+    { c: '影音', l: '短片2', u: 'https://sora.komica1.org/69/', s: 'down' },
+    { c: '影音', l: '彈幕', u: 'https://komica.yucie.net/video/', s: 'down' },
+    { c: '影音', l: '直播', u: 'https://komica.yucie.net/boardcast/', s: 'down' },
+    { c: '影音', l: 'MAD', u: 'https://grea.komica1.org/39/index.htm', s: 'down' },
+    { c: '影音', l: 'VTuber', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=VTuber', s: 'ok' },
+    { c: '遊戲', l: '遊戲速報', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%81%8A%E6%88%B2', s: 'ok' },
+    { c: '遊戲', l: '動作遊戲', u: 'https://kagaminerin.org/act/', s: 'down' },
+    { c: '遊戲', l: '格鬥遊戲', u: 'https://komica.yucie.net/fight/', s: 'down' },
+    { c: '遊戲', l: '2D STG', u: 'https://kagaminerin.org/stg/', s: 'down' },
+    { c: '遊戲', l: '3D STG', u: 'https://kagaminerin.org/fps/', s: 'down' },
+    { c: '遊戲', l: '冒險遊戲', u: 'https://kagaminerin.org/avg/', s: 'down' },
+    { c: '遊戲', l: 'RPG', u: 'https://kagaminerin.org/rpg/', s: 'down' },
+    { c: '遊戲', l: '賽車遊戲', u: 'https://warehouse-no-99.neocities.org/rcg-slg/', s: 'ok' },
+    { c: '遊戲', l: '戰略遊戲', u: 'https://warehouse-no-99.neocities.org/rcg-slg/', s: 'ok' },
+    { c: '遊戲', l: '養成遊戲', u: 'https://komica.yucie.net/slg/', s: 'down' },
+    { c: '遊戲', l: '戀愛遊戲', u: 'https://komica.yucie.net/renai/', s: 'down' },
+    { c: '遊戲', l: '女性向遊戲', u: 'https://2cat.org/~boylove/', s: 'ok' },
+    { c: '遊戲', l: '網頁遊戲', u: 'https://2cat.org/~webgame/', s: 'ok' },
+    { c: '遊戲', l: '獨立遊戲', u: 'https://komica.dbfoxtw.me/indiegame/', s: 'ok' },
+    { c: '遊戲', l: '手機遊戲', u: 'https://2cat.org/~handheld/', s: 'ok' },
+    { c: '遊戲', l: 'VR/體感遊戲', u: 'https://2cat.org/~motion/', s: 'ok' },
+    { c: '遊戲', l: '桌上遊戲', u: 'https://2cat.org/~boardgame/', s: 'ok' },
+    { c: '遊戲', l: '麻將', u: 'https://moecorner.com/iboards/Mahjong/', s: 'down' },
+    { c: '遊戲', l: '遊戲設計', u: 'https://komica.dbfoxtw.me/gameprogramming/', s: 'ok' },
+    { c: '遊戲', l: '網路遊戲', u: 'https://grea.komica1.org/52/index.htm', s: 'down' },
+    { c: '遊戲作品', l: 'AGA', u: 'https://selene.zawarudo.org/alicegearaegis/', s: 'ok' },
+    { c: '遊戲作品', l: 'Azur Lane', u: 'https://2cat.org/~azurlane/', s: 'ok' },
+    { c: '遊戲作品', l: 'DOTA2', u: 'https://dota2.akraft.net/', s: 'ok' },
+    { c: '遊戲作品', l: 'FEZ', u: 'https://komica.yucie.net/fez/', s: 'down' },
+    { c: '遊戲作品', l: 'GTA', u: 'https://fenrisulfr.org/gta/', s: 'ok' },
+    { c: '遊戲作品', l: 'Minecraft', u: 'https://komica.peroneko.org/minecraft/', s: 'down' },
+    { c: '遊戲作品', l: 'T7S', u: 'https://www.karlsland.net/t7s/', s: 'ok' },
+    { c: '遊戲作品', l: 'WOW', u: 'http://www.wowhk.org/', s: 'down' },
+    { c: '遊戲作品', l: '少女前線', u: 'https://selene.zawarudo.org/gf/', s: 'ok' },
+    { c: '遊戲作品', l: '碧藍幻想', u: 'https://2cat.org/~granblue/', s: 'ok' },
+    { c: '遊戲作品', l: '戰車世界', u: 'https://fenrisulfr.org/wot/', s: 'ok' },
+    { c: '遊戲作品', l: '戰地風雲', u: 'https://fenrisulfr.org/battlefield/', s: 'ok' },
+    { c: '遊戲作品', l: '戰爭雷霆', u: 'https://fenrisulfr.org/war_thunder/', s: 'ok' },
+    { c: '遊戲作品', l: '戰機世界', u: 'https://fenrisulfr.org/wowp/', s: 'ok' },
+    { c: '遊戲作品', l: '戰艦世界', u: 'https://fenrisulfr.org/wows/', s: 'ok' },
+    { c: '遊戲作品', l: '艦隊收藏', u: 'http://acgspace.wsfun.com/kancolle/', s: 'down' },
+    { c: '遊戲作品', l: '魔物獵人', u: 'http://strange-komica.com/MonsterHunter/', s: 'ok' },
+    { c: '遊戲作品', l: '蔚藍檔案', u: 'https://www.gomiga.org/bluearchive/', s: 'ok' },
+    { c: '動漫作品', l: '動物朋友', u: 'https://grea.komica1.org/68/', s: 'down' },
+    { c: '動漫作品', l: '東方', u: 'https://2cat.org/~touhou/', s: 'ok' },
+    { c: '動漫作品', l: '龍騎士07', u: 'https://2cat.org/~07expansion/', s: 'ok' },
+    { c: '動漫作品', l: '涼宮', u: 'https://eclair.nagatoyuki.org/szmy/', s: 'ok' },
+    { c: '動漫作品', l: '奈葉', u: 'https://nanoha.boguspix.com/', s: 'down' },
+    { c: '動漫作品', l: '遊戲王', u: 'https://grea.komica1.org/73/index.htm', s: 'down' },
+    { c: '動漫作品', l: 'APH', u: 'https://kagaminerin.org/aph1/', s: 'down' },
+    { c: '動漫作品', l: 'Homestuck', u: 'https://komica.dbfoxtw.me/homestuck/', s: 'ok' },
+    { c: '動漫作品', l: 'IM@S', u: 'http://anzuchang.com/', s: 'down' },
+    { c: '動漫作品', l: 'Pokemon', u: 'https://kagaminerin.org/pokemon/', s: 'down' },
+    { c: '動漫作品', l: 'Pretty Cure', u: 'https://komica.yucie.net/prettycure/', s: 'down' },
+    { c: '動漫作品', l: 'Strike Witches', u: 'https://www.karlsland.net/sw/', s: 'ok' },
+    { c: '製作公司', l: 'Capcom', u: 'https://komica.yucie.net/capcom/', s: 'down' },
+    { c: '製作公司', l: 'GAINAX', u: 'https://kagaminerin.org/gainax/', s: 'down' },
+    { c: '製作公司', l: 'KOEI', u: 'https://www.karlsland.net/koei/', s: 'ok' },
+    { c: '製作公司', l: 'SQEX', u: 'https://moecorner.com/iboards/Square_Enix/', s: 'down' },
+    { c: '製作公司', l: 'TYPE-MOON', u: 'http://gzone-anime.info/UnitedSites/TypeMoon/', s: 'ok' },
+    { c: '製作公司', l: '京都動畫', u: 'https://komica.yucie.net/kyoutoanimate/', s: 'down' },
+    { c: '聲優藝人', l: '聲優綜合', u: 'https://komica.yucie.net/seiyuu/', s: 'down' },
+    { c: '聲優藝人', l: '釘宮', u: 'https://komica.yucie.net/kugimiya/', s: 'down' },
+    { c: '聲優藝人', l: '田村/堀江/水樹', u: 'https://komica.yucie.net/nana/', s: 'down' },
+    { c: '聲優藝人', l: 'Sound Horizon', u: 'http://laurenthorizon.weebly.com/', s: 'down' },
+    { c: '專題板', l: '角色配對', u: 'https://kagaminerin.org/flash/', s: 'down' },
+    { c: '專題板', l: '催淚', u: 'https://kagaminerin.org/tearing/', s: 'down' },
+    { c: '專題板', l: '性轉換', u: 'https://grea.komica1.org/72/', s: 'down' },
+    { c: '專題板', l: '巫女', u: 'https://pixmicat.alica.idv.tw/miko/', s: 'down' },
+    { c: '專題板', l: '魔女', u: 'https://komica.yucie.net/magic/', s: 'down' },
+    { c: '專題板', l: '蘿莉', u: 'https://komica.yucie.net/lori/', s: 'down' },
+    { c: '專題板', l: '正太', u: 'http://p.komica.acg.club.tw/s/', s: 'ok' },
+    { c: '專題板', l: '御姊', u: 'http://sister.boguspix.com/', s: 'ok' },
+    { c: '專題板', l: '兄貴', u: 'http://p.komica.acg.club.tw/a/', s: 'ok' },
+    { c: '專題板', l: '妹系', u: 'https://komica.yucie.net/imoto/', s: 'down' },
+    { c: '專題板', l: '人外', u: 'https://komica.dbfoxtw.me/jingai/', s: 'ok' },
+    { c: '專題板', l: '獸', u: 'https://kemono.wtako.net/kemono/', s: 'ok' },
+    { c: '專題板', l: '機娘', u: 'http://msgirls.boguspix.com/', s: 'ok' },
+    { c: '專題板', l: '返信娘', u: 'https://2cat.komica1.org/~rt/hd/', s: 'down' },
+    { c: '專題板', l: 'Lolita Fashion', u: 'https://komica.yucie.net/lolita/', s: 'down' },
+    { c: '創作', l: '塗鴉王國', u: 'https://grea.komica1.org/30/index.htm', s: 'down' },
+    { c: '創作', l: '線上繪圖', u: 'https://selene.zawarudo.org/dessin/', s: 'ok' },
+    { c: '創作', l: '塗鴉保育區', u: 'https://kemono.wtako.net/kemozone/', s: 'ok' },
+    { c: '創作', l: '3D', u: 'https://grea.komica1.org/3d/index.htm', s: 'down' },
+    { c: '創作', l: 'MMD/Vocaloid', u: 'https://selene.zawarudo.org/avenir/', s: 'ok' },
+    { c: '創作', l: '同人', u: 'https://grea.komica1.org/65/index.htm', s: 'down' },
+    { c: '創作', l: '宣傳', u: 'https://luna.komica1.org/20d/index.htm', s: 'down' },
+    { c: '飲食', l: '飲食', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%A3%B2%E9%A3%9F', s: 'ok' },
+    { c: '飲食', l: '酒', u: 'https://eclair.nagatoyuki.org/beverage/', s: 'ok' },
+    { c: '飲食', l: '咖啡/茶', u: 'https://2cat.org/~coffee/', s: 'ok' },
+    { c: '飲食', l: '烹飪', u: 'https://2cat.org/~cooking/', s: 'ok' },
+    { c: '飲食', l: '素食', u: 'https://kagaminerin.org/vegetarian/', s: 'down' },
+    { c: '體育運動', l: '體育', u: 'https://grea.komica1.org/49/index.htm', s: 'down' },
+    { c: '體育運動', l: '足球', u: 'https://komica.yucie.net/worldcup/', s: 'down' },
+    { c: '體育運動', l: '武術', u: 'https://komica.yucie.net/budou/', s: 'down' },
+    { c: '動物', l: '動物綜合', u: 'https://2cat.org/~animal/', s: 'ok' },
+    { c: '動物', l: '犬', u: 'https://komica.yucie.net/dog/', s: 'down' },
+    { c: '動物', l: '貓', u: 'https://komica.yucie.net/cat/', s: 'down' },
+    { c: '動物', l: '鳥', u: 'https://2cat.org/~bird/', s: 'ok' },
+    { c: '動物', l: '水族', u: 'https://komica.yucie.net/grearium/', s: 'down' },
+    { c: '動物', l: '認養', u: 'https://komica.yucie.net/adopt/', s: 'down' },
+    { c: '桌布壁紙', l: '二次壁', u: 'https://2cat.org/~wallpaper/', s: 'ok' },
+    { c: '桌布壁紙', l: '三次壁', u: 'http://2nee.org/bg_photo', s: 'down' },
+    { c: '桌布壁紙', l: 'PSV/手機壁', u: 'https://2cat.komica1.org/~touhonoob/14d/', s: 'down' },
+    { c: '電腦網路', l: '電腦/消費電子', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%9B%BB%E8%85%A6', s: 'ok' },
+    { c: '電腦網路', l: 'Pixmicat!', u: 'https://2cat.komica1.org/~scribe/pixmicat_dev/', s: 'down' },
+    { c: '電腦網路', l: '程設交流', u: 'https://www.gomiga.org/cs/', s: 'ok' },
+    { c: '電腦網路', l: '人工智慧', u: 'https://www.gomiga.org/ai/', s: 'ok' },
+    { c: '電腦網路', l: 'Apple', u: 'https://moecorner.com/iboards/Apple/', s: 'down' },
+    { c: '本地板', l: '文化交流', u: 'https://grea.komica1.org/22/index.htm', s: 'down' },
+    { c: '本地板', l: '寫真', u: 'https://sora.komica1.org/16/index.htm', s: 'down' },
+    { c: '本地板', l: '女性角色', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%A5%B3%E6%80%A7%E8%A7%92%E8%89%B2', s: 'ok' },
+    { c: '本地板', l: '男性角色', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E7%94%B7%E6%80%A7%E8%A7%92%E8%89%B2', s: 'ok' },
+    { c: '本地板', l: '中性角色', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E4%B8%AD%E6%80%A7%E8%A7%92%E8%89%B2', s: 'ok' },
+    { c: '本地板', l: '四格', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%9B%9B%E6%A0%BC', s: 'ok' },
+    { c: '本地板', l: '擬人化', u: 'https://grea.komica1.org/36/index.htm', s: 'down' },
+    { c: '本地板', l: '少女漫畫', u: 'https://grea.komica1.org/47/index.htm', s: 'down' },
+    { c: '本地板', l: '音樂', u: 'https://grea.komica1.org/29/index.htm', s: 'down' },
+    { c: '本地板', l: '布袋戲', u: 'https://grea.komica1.org/46/index.htm', s: 'down' },
+    { c: '本地板', l: '小說', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%B0%8F%E8%AA%AA', s: 'ok' },
+    { c: '本地板', l: '奇幻/科幻', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%A5%87%E5%B9%BB%E7%A7%91%E5%B9%BB', s: 'ok' },
+    { c: '本地板', l: '紙牌', u: 'https://grea.komica1.org/10/index.htm', s: 'down' },
+    { c: '本地板', l: '高解析度', u: 'https://grea.komica1.org/33/index.htm', s: 'down' },
+    { c: '本地板', l: 'GIF', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=GIF', s: 'ok' },
+    { c: '本地板', l: 'WebM', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=WebM', s: 'ok' },
+    { c: '本地板', l: 'MP4', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=MP4', s: 'ok' },
+    { c: '本地板', l: 'FLASH', u: 'https://grea.komica1.org/24/index.htm', s: 'down' },
+    { c: '本地板', l: '求圖', u: 'https://sora.komica1.org/45/index.htm', s: 'down' },
+    { c: '文字板', l: '綜合討論', u: 'https://grea.komica1.org/f1a/index.php', s: 'down' },
+    { c: '文字板', l: '連結', u: 'https://grea.komica1.org/f3/index.php', s: 'down' },
+    { c: '文字板', l: '豆知識', u: 'https://grea.komica1.org/f5/index.php', s: 'down' },
+    { c: '文字板', l: '電腦', u: 'https://grea.komica1.org/f6/index.php', s: 'down' },
+    { c: '文字板', l: '單身', u: 'https://grea.komica1.org/f7b/index.php', s: 'down' },
+    { c: '文字板', l: '寫作', u: 'https://grea.komica1.org/f9/index.php', s: 'down' },
+    { c: '其他', l: 'KomicaWiki', u: 'https://yuki.komica1.org/', s: 'down' },
+    { c: '其他', l: '精華區', u: 'https://grea.komica1.org/up/index.php', s: 'down' },
+    { c: '其他', l: 'Komicolle', u: 'http://komicolle.org/', s: 'down' },
+    { c: '聊天室', l: 'BarGiko', u: 'http://l4cs.jpn.org/gikopoi/', s: 'ok' },
+    { c: '聊天室', l: 'IRC', u: 'irc://irc.freenode.net/2cat', s: 'ok' },
+    { c: '聊天室', l: '(Web)', u: 'https://2cat.komica1.org/~rt/irc/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '動畫裡', u: 'https://2cat.org/~hanime/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '成人玩具', u: 'https://2cat.org/~toy/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '東方裡', u: 'https://2cat.org/touhoux/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://2cat.org/~futa/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '詢問裡', u: 'https://majeur.zawarudo.org/demande/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://2cat.org/~know/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '高解析裡', u: 'https://2cat.org/~hisoura/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://2cat.org/~gifura/', s: 'down' },
+    { c: '外部連結', l: '0rz.tw', u: 'http://0rz.tw/', s: 'ok' },
+    { c: '外部連結', l: 'Google 日本', u: 'https://www.google.co.jp/ja', s: 'ok' },
+    { c: '外部連結', l: 'goo 辞書', u: 'https://dictionary.goo.ne.jp/', s: 'down' },
+    { c: '外部連結', l: 'Yahoo! 字典', u: 'https://tw.dictionary.yahoo.com/', s: 'ok' },
+    { c: '外部連結', l: '英漢字典', u: 'https://cdict.net/', s: 'ok' },
+    { c: '外部連結', l: '國語辭典', u: 'http://dict.revised.moe.edu.tw/cbdic/index.html', s: 'ok' },
+    { c: '外部連結', l: 'Excite 翻訳', u: 'https://www.excite.co.jp/world/chinese/', s: 'down' },
+    { c: '外部連結', l: 'Babel Fish', u: 'https://www.babelfish.com/', s: 'ok' },
+    { c: '外部連結', l: '維基百科', u: 'https://zh.wikipedia.org/', s: 'ok' },
+    { c: '外部連結', l: 'Yahoo! 知識+', u: 'https://tw.answers.yahoo.com/', s: 'ok' },
+    { c: '外部連結', l: '繁簡轉換', u: 'http://www.tdctrade.com/putonghua/index.htm', s: 'ok' },
+    { c: '外部連結', l: '假名注音', u: 'http://www.hiragana.jp/', s: 'ok' },
+    { c: '外部連結', l: '漢字轉換', u: 'http://nihongo.j-talk.com/', s: 'ok' },
+    { c: '失效連結', l: '綜合學術', u: 'http://gzone-anime.info/UnitedSites/academic/', s: 'ok' },
+  ];
+  // </boards>
+
+  function normalizeBoardUrl(value) {
+    try {
+      const url = new URL(value);
+      if (!/^https?:$/.test(url.protocol)) return null;
+      url.hash = '';
+      url.pathname = url.pathname.replace(/index\.(?:htm|html|php)$/i, '');
+      if (!/\.[^/]+$/.test(url.pathname) && !url.pathname.endsWith('/')) url.pathname += '/';
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function matchBoard(href, boards) {
+    const normalized = normalizeBoardUrl(href);
+    if (!normalized) return null;
+    const exact = boards.find((board) => normalizeBoardUrl(board.u) === normalized);
+    if (exact) return exact;
+    const url = new URL(normalized);
+    if (url.origin !== 'https://gaia.komica1.org' || !url.pathname.startsWith('/00b/')) return null;
+    if (url.pathname === '/00b/pixmicat2.php' && url.searchParams.has('c')) {
+      return boards.find((board) => {
+        const candidate = new URL(board.u);
+        return candidate.origin === url.origin && candidate.pathname === url.pathname && candidate.searchParams.get('c') === url.searchParams.get('c');
+      }) || null;
+    }
+    if (url.pathname === '/00b/' || /^\/00b\/\d+\.htm$/.test(url.pathname) ||
+      (url.pathname === '/00b/pixmicat.php' && /^\d+$/.test(url.searchParams.get('res') || ''))) {
+      return boards.find((board) => normalizeBoardUrl(board.u) === 'https://gaia.komica1.org/00b/') || null;
+    }
+    return null;
+  }
+
+  function filterBoards(boards, query) {
+    const needle = String(query).trim().toLocaleLowerCase();
+    return needle ? boards.filter((board) => `${board.l} ${board.c}`.toLocaleLowerCase().includes(needle)) : boards;
+  }
 
   // `pixmicat.php?res=N[#rM]` on the same board → { res, post }; anything else → null
   function threadLink(href, base) {
@@ -95,16 +366,37 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
+  if (location.hostname === 'komica1.org' && !(location.pathname === '/bbsmenu.html' && window.name === 'menu')) return;
   if (window.__krState) return;
-  const state = (window.__krState = { drawer: null });
+  const state = (window.__krState = { drawer: null, sideWidth: 0 });
+
+  const store = {
+    get(key, fallback) {
+      try {
+        if (typeof GM_getValue === 'function') return GM_getValue(key, fallback);
+        const value = localStorage.getItem(key);
+        return value === null ? fallback : JSON.parse(value);
+      } catch {
+        return fallback;
+      }
+    },
+    set(key, value) {
+      try {
+        if (typeof GM_setValue === 'function') GM_setValue(key, value);
+        else localStorage.setItem(key, JSON.stringify(value));
+      } catch {
+        return;
+      }
+    },
+  };
 
   let embedded = false;
   try {
-    embedded = window.name === FRAME_NAME && window.parent !== window && !!window.parent.__krState;
+    embedded = window.name === FRAME_NAME && window.parent !== window && window.parent.location.origin === location.origin;
   } catch {
     embedded = false;
   }
@@ -194,7 +486,39 @@ html.kr-md:not(.kr-drawer-open) .kr-drawer-reload, html.kr-md:not(.kr-drawer-ope
 html.kr .kr-drawer-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
 html.kr.kr-resizing, html.kr.kr-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.kr.kr-resizing .kr-drawer-frame { pointer-events: none; }
+html.kr .kr-side { position: fixed; z-index: 8999; inset: 0 auto 0 0; width: 248px; box-sizing: border-box; display: flex;
+  flex-direction: column; background: var(--kr-bg); color: inherit; border-right: 1px solid var(--kr-line); font: 14px/1.4 system-ui, -apple-system, "PingFang TC", sans-serif; }
+html.kr .kr-side-head { position: sticky; top: 0; z-index: 1; padding: 10px; background: var(--kr-bg); border-bottom: 1px solid var(--kr-line); }
+html.kr .kr-side-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 17px; }
+html.kr .kr-side button { color: inherit; cursor: pointer; font: inherit; }
+html.kr .kr-side-close, html.kr .kr-side-open { border: 0; background: transparent; border-radius: 6px; }
+html.kr .kr-side-close { width: 30px; height: 30px; font-size: 20px; }
+html.kr .kr-side-search { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 7px 9px; background: var(--kr-bg); color: inherit;
+  border: 1px solid var(--kr-line); border-radius: 8px; font: inherit; }
+html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 8px 6px 16px; }
+html.kr .kr-side-group { margin-bottom: 6px; }
+html.kr .kr-side-group-toggle { width: 100%; padding: 8px 7px 5px; border: 0; background: none; text-align: left;
+  font-size: 12px !important; font-weight: 700 !important; letter-spacing: .06em; opacity: .65; }
+html.kr .kr-side-row { display: flex; align-items: center; min-height: 32px; border-radius: 6px; }
+html.kr .kr-side-row:hover, html.kr .kr-side-row[aria-current="page"] { background: color-mix(in srgb, currentColor 10%, transparent); }
+html.kr .kr-side-row > a { flex: 1; min-width: 0; padding: 5px 6px 5px 10px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-decoration: none; color: inherit; }
+html.kr .kr-side-star { flex: none; width: 28px; min-height: 28px; border: 0; background: none; }
+html.kr .kr-side-down { opacity: .5; }
+html.kr .kr-side-tag { flex: none; font-size: 10px; padding-right: 3px; }
+html.kr .kr-side-open { display: none; position: fixed; z-index: 9000; top: 5px; left: 5px; width: 30px; height: 30px;
+  border: 1px solid var(--kr-line); background: var(--kr-bg); color: inherit; cursor: pointer; }
+html.kr.kr-side-hidden .kr-side { display: none; }
+html.kr.kr-side-hidden .kr-side-open { display: block; }
+html.kr-portal body { margin: 0; }
+html.kr-portal body > :not(.kr-side):not(.kr-side-open) { display: none !important; }
+html.kr-portal.kr-side-hidden .kr-side-open { display: block; }
 @media (max-width: 899px) {
+  html.kr-md .kr-side { box-shadow: 8px 0 24px rgba(0, 0, 0, .2); }
+  html.kr-md:not(.kr-side-overlay) .kr-side { display: none; }
+  html.kr-md:not(.kr-side-overlay) .kr-side-open { display: block; }
+  html.kr-md.kr-side-overlay .kr-side { display: flex; }
+  html.kr-md.kr-side-overlay .kr-side-open { display: none; }
   html.kr .kr-drawer { width: 100vw; }
   html.kr-md.kr-drawer-open body { overflow: hidden; }
   html.kr-md.kr-drawer-open .kr-composer.kr-new { right: 16px; }
@@ -218,6 +542,181 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     if (text !== undefined) n.textContent = text;
     return n;
   };
+
+  function setupSidebar(boards, portal = false) {
+    const current = portal ? null : matchBoard(location.href, boards);
+    let stars = store.get('kr.stars', []);
+    let recent = store.get('kr.recent', []);
+    let collapsed = store.get('kr.collapsed', {});
+    if (!Array.isArray(stars)) stars = [];
+    if (!Array.isArray(recent)) recent = [];
+    if (!collapsed || typeof collapsed !== 'object' || Array.isArray(collapsed)) collapsed = {};
+    if (current && !portal) {
+      recent = [current.u, ...recent.filter((url) => url !== current.u)].slice(0, 6);
+      store.set('kr.recent', recent);
+    }
+
+    const side = el('aside', { class: 'kr-side', 'aria-label': '板塊導覽' });
+    const head = el('header', { class: 'kr-side-head' });
+    const title = el('div', { class: 'kr-side-title' });
+    const close = el('button', { type: 'button', class: 'kr-side-close', 'aria-label': '收起板塊導覽' }, '«');
+    title.append(el('span', {}, 'K島'), close);
+    const search = el('input', { class: 'kr-side-search', type: 'search', placeholder: '搜尋板塊…', 'aria-label': '搜尋板塊' });
+    head.append(title, search);
+    const list = el('div', { class: 'kr-side-list' });
+    const open = el('button', { type: 'button', class: 'kr-side-open', 'aria-label': '開啟板塊導覽' }, '☰');
+    side.append(head, list);
+    document.body.append(side, open);
+
+    const frameset = portal ? (() => {
+      try {
+        return window.parent.document.querySelector('frameset');
+      } catch {
+        return null;
+      }
+    })() : null;
+    let hidden = store.get('kr.sideHidden', false) === true;
+    let overlay = false;
+    let currentExpanded = !!current;
+    const applySide = () => {
+      const mobile = !portal && window.innerWidth < 900;
+      const visible = mobile ? overlay : !hidden;
+      root.classList.toggle('kr-side-hidden', !visible);
+      root.classList.toggle('kr-side-overlay', mobile && overlay);
+      state.sideWidth = !portal && !mobile && visible ? 248 : 0;
+      root.style.setProperty('--kr-side', `${state.sideWidth}px`);
+      try {
+        if (frameset) frameset.cols = visible ? '248,*' : '40,*';
+      } catch {
+        return;
+      }
+      window.dispatchEvent(new Event('kr-side-resize'));
+    };
+    close.addEventListener('click', () => {
+      if (window.innerWidth < 900 && !portal) overlay = false;
+      else {
+        hidden = true;
+        store.set('kr.sideHidden', true);
+      }
+      applySide();
+    });
+    open.addEventListener('click', () => {
+      if (window.innerWidth < 900 && !portal) overlay = true;
+      else {
+        hidden = false;
+        store.set('kr.sideHidden', false);
+      }
+      applySide();
+      search.focus();
+    });
+    if (!portal) window.addEventListener('resize', applySide);
+
+    const byUrl = (url) => boards.find((board) => normalizeBoardUrl(board.u) === normalizeBoardUrl(url));
+    const row = (board) => {
+      const node = el('div', { class: `kr-side-row${board.s === 'down' ? ' kr-side-down' : ''}` });
+      const link = el('a', { href: board.u, target: board.c === '外部連結' ? '_blank' : portal ? 'cont' : '_self' }, board.l);
+      if (board.c === '外部連結') link.rel = 'noopener';
+      if (board.s === 'down') {
+        link.title = `上次檢查 ${BOARDS_AT} 連不上`;
+        node.append(el('span', { class: 'kr-side-tag', title: link.title }, '連不上'));
+      }
+      if (current && normalizeBoardUrl(current.u) === normalizeBoardUrl(board.u)) {
+        node.setAttribute('aria-current', 'page');
+        link.setAttribute('aria-current', 'page');
+      }
+      link.addEventListener('click', () => {
+        if (window.innerWidth < 900 && !portal) {
+          overlay = false;
+          applySide();
+        }
+      });
+      const starred = stars.includes(board.u);
+      const star = el('button', { type: 'button', class: 'kr-side-star', 'aria-label': `${starred ? '移除' : '加入'}書籤 ${board.l}`, 'aria-pressed': String(starred) }, starred ? '★' : '☆');
+      star.addEventListener('click', () => {
+        stars = starred ? stars.filter((url) => url !== board.u) : [...stars, board.u];
+        store.set('kr.stars', stars);
+        render();
+      });
+      node.append(link, star);
+      return node;
+    };
+    const group = (name, items, isCollapsed = false) => {
+      if (!items.length) return;
+      const section = el('section', { class: 'kr-side-group' });
+      const toggle = el('button', { type: 'button', class: 'kr-side-group-toggle', 'aria-expanded': String(!isCollapsed) }, `${isCollapsed ? '▸' : '▾'} ${name.replace(/^▶\s*/, '').replace(/\s*\[鎖定\]$/, '')}`);
+      toggle.addEventListener('click', () => {
+        currentExpanded = false;
+        collapsed[name] = !isCollapsed;
+        store.set('kr.collapsed', collapsed);
+        render();
+      });
+      section.append(toggle);
+      if (!isCollapsed) for (const board of items) section.append(row(board));
+      list.append(section);
+    };
+    const render = () => {
+      list.replaceChildren();
+      const query = search.value.trim();
+      if (query) {
+        for (const board of filterBoards(boards, query)) list.append(row(board));
+        return;
+      }
+      group('★ 書籤', stars.map(byUrl).filter(Boolean));
+      group('最近', recent.map(byUrl).filter(Boolean));
+      const categories = [...new Set(boards.map((board) => board.c))];
+      for (const category of categories) {
+        const items = boards.filter((board) => board.c === category && board.s !== 'down');
+        // the site's menu keeps its 18禁 section locked until clicked; here it starts folded
+        group(category, items, (collapsed[category] ?? /18禁/.test(category)) && !(currentExpanded && category === current?.c));
+      }
+      const down = boards.filter((board) => board.s === 'down');
+      const downName = `目前連不上（${down.length}）`;
+      group(downName, down, collapsed[downName] !== false);
+    };
+    search.addEventListener('input', render);
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const first = list.querySelector('.kr-side-row a');
+        if (first) {
+          e.preventDefault();
+          first.click();
+        }
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && overlay) {
+        overlay = false;
+        applySide();
+        e.stopImmediatePropagation();
+      } else if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]') && !e.target.isContentEditable) {
+        e.preventDefault();
+        if (root.classList.contains('kr-side-hidden')) open.click();
+        else search.focus();
+      }
+    }, true);
+    applySide();
+    render();
+  }
+
+  function portalBoards() {
+    const statuses = new Map(BOARDS.map((board) => [normalizeBoardUrl(board.u), board.s]));
+    const boards = [];
+    let category = '';
+    for (const item of document.querySelectorAll('li')) {
+      if (item.classList.contains('category')) {
+        category = item.textContent.trim();
+        continue;
+      }
+      if (!category || category === '主題選擇') continue;
+      for (const link of item.querySelectorAll(':scope > a[href]')) {
+        const href = link.getAttribute('href');
+        if (!href || href === '#' || /^javascript:/i.test(href)) continue;
+        const url = link.href;
+        boards.push({ c: category, l: link.textContent.trim(), u: url, s: statuses.get(normalizeBoardUrl(url)) || 'ok' });
+      }
+    }
+    return boards;
+  }
 
   function syncTheme() {
     const colors = [document.body, root].filter(Boolean).map((n) => getComputedStyle(n).backgroundColor);
@@ -364,11 +863,12 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       width = null;
     }
     const applyWidth = () => {
-      root.style.setProperty('--kr-drawer-w', `${clampWidth(width, window.innerWidth)}px`);
+      root.style.setProperty('--kr-drawer-w', `${clampWidth(width, window.innerWidth - state.sideWidth)}px`);
       root.classList.toggle('kr-docked', window.innerWidth >= 900);
     };
     applyWidth();
     window.addEventListener('resize', applyWidth);
+    window.addEventListener('kr-side-resize', applyWidth);
 
     resize.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -382,7 +882,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       const up = () => {
         root.classList.remove('kr-resizing');
         resize.removeEventListener('pointermove', move);
-        width = clampWidth(width, window.innerWidth);
+        width = clampWidth(width, window.innerWidth - state.sideWidth);
         try {
           localStorage.setItem(WIDTH_KEY, String(width));
         } catch {
@@ -530,6 +1030,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
 
   function initTop() {
     root.classList.add('kr-md');
+    if (window.name !== 'cont' || window.top === window) setupSidebar(BOARDS);
     setupDrawer();
     decorateThreads(document);
     const threads = document.getElementById('threads');
@@ -620,6 +1121,10 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
   }
 
   function init() {
+    if (root.classList.contains('kr-portal')) {
+      setupSidebar(portalBoards(), true);
+      return;
+    }
     watchTheme();
     setupComposer();
     if (composer.resto) window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
@@ -630,7 +1135,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
 
   function start() {
     root = document.documentElement;
-    root.classList.add('kr', embedded ? 'kr-embed' : 'kr-top');
+    root.classList.add('kr', location.hostname === 'komica1.org' ? 'kr-portal' : embedded ? 'kr-embed' : 'kr-top');
     const style = document.createElement('style');
     style.id = 'kr-style';
     style.textContent = CSS;

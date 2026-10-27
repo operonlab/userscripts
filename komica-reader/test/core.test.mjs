@@ -6,10 +6,39 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
+const boards = [
+  { c: '連線板', l: '綜合', u: BOARD, s: 'ok' },
+  { c: '連線板', l: '動畫', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB', s: 'ok' },
+  { c: '遊戲', l: 'Model', u: 'https://example.org/model/', s: 'down' },
+];
+
+test('board URLs retain category queries and normalize index pages', () => {
+  assert.equal(normalizeBoardUrl('https://GAIA.KOMICA1.ORG/00b/index.htm#top'), 'https://gaia.komica1.org/00b/');
+  assert.equal(normalizeBoardUrl('https://example.org/a/index.php?c=x#top'), 'https://example.org/a/?c=x');
+  assert.equal(normalizeBoardUrl('https://example.org/a'), 'https://example.org/a/');
+  assert.equal(normalizeBoardUrl('javascript:alert(1)'), null);
+  assert.equal(normalizeBoardUrl('broken'), null);
+});
+
+test('board matching distinguishes category views from the 00b index and threads', () => {
+  assert.equal(matchBoard('https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB', boards), boards[1]);
+  for (const href of ['https://gaia.komica1.org/00b/1.htm', 'https://gaia.komica1.org/00b/index.htm?page=2', 'https://gaia.komica1.org/00b/pixmicat.php?res=123']) {
+    assert.equal(matchBoard(href, boards), boards[0]);
+  }
+  assert.equal(matchBoard('https://gaia.komica1.org/00b/pixmicat.php?mode=category', boards), null);
+  assert.equal(matchBoard('https://other.org/00b/1.htm', boards), null);
+});
+
+test('board filtering matches label or category without case or surrounding spaces', () => {
+  assert.deepEqual(plain(filterBoards(boards, '  動畫  ')), plain([boards[1]]));
+  assert.deepEqual(plain(filterBoards(boards, '遊戲')), plain([boards[2]]));
+  assert.deepEqual(plain(filterBoards(boards, 'mOdEl')), plain([boards[2]]));
+  assert.equal(filterBoards(boards, '').length, boards.length);
+});
 
 test('the [回應] link of a thread opens that thread', () => {
   assert.deepEqual(plain(threadLink('pixmicat.php?res=30971699', BOARD)), { res: 30971699, post: null });
