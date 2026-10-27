@@ -34,7 +34,7 @@
   // <boards>
   const BOARDS_AT = '2026-10-27';
   const BOARDS = [
-    { c: '連線板', l: '2CAT', u: 'https://2cat.komica1.org/', s: 'down' },
+    { c: '連線板', l: '2CAT', u: 'https://2cat.uk/', s: 'ok' },
     { c: '連線板', l: '貓管理部', u: 'https://2cat.komica1.org/0d/fstyle.html', s: 'down' },
     { c: '連線板', l: '站務公告', u: 'https://komica.blogspot.com/', s: 'ok' },
     { c: '連線板', l: '動畫', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB', s: 'ok' },
@@ -237,14 +237,14 @@
     { c: '聊天室', l: 'BarGiko', u: 'http://l4cs.jpn.org/gikopoi/', s: 'ok' },
     { c: '聊天室', l: 'IRC', u: 'irc://irc.freenode.net/2cat', s: 'ok' },
     { c: '聊天室', l: '(Web)', u: 'https://2cat.komica1.org/~rt/irc/', s: 'down' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '動畫裡', u: 'https://2cat.org/~hanime/', s: 'down' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '成人玩具', u: 'https://2cat.org/~toy/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '動畫裡', u: 'https://cat.2nyan.org/hanime/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '成人玩具', u: 'https://cat.2nyan.org/toy/', s: 'ok' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '東方裡', u: 'https://2cat.org/touhoux/', s: 'ok' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://2cat.org/~futa/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://cat.2nyan.org/futa/', s: 'ok' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '詢問裡', u: 'https://majeur.zawarudo.org/demande/', s: 'ok' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://2cat.org/~know/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://cat.2nyan.org/know/', s: 'ok' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '高解析裡', u: 'https://2cat.org/~hisoura/', s: 'ok', f: 'https://2cat.org/hiso/' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://2cat.org/~gifura/', s: 'down' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://cat.2nyan.org/gifura/', s: 'ok' },
     { c: '外部連結', l: '0rz.tw', u: 'http://0rz.tw/', s: 'ok' },
     { c: '外部連結', l: 'Google 日本', u: 'https://www.google.co.jp/ja', s: 'ok' },
     { c: '外部連結', l: 'goo 辞書', u: 'https://dictionary.goo.ne.jp/', s: 'down' },

@@ -8,6 +8,7 @@ Userscript managers update a script only when `@version` goes up, so every versi
 - **2cat boards** (`2cat.org`, `2cat.uk`) get the same reader: list rows, the thread pane, the floating form and the sidebar. Both of 2cat's layouts are read, the older one (職業) and the newer one (手機遊戲).
 - A long 2cat thread opens on its last page, as the site does; **載入全部** fetches every page and draws the whole thread. The site's own ALL link shows only the latest 100 replies.
 - The sidebar finds the current board when its menu link redirects (`2cat.org/~career/` lands on `/career/`).
+- Five 18禁 boards the portal still lists at dead addresses (動畫裡, 成人玩具, 偽娘裡, 知識裡, GIF裡) link to where they live now, `cat.2nyan.org`, and 2CAT links to `2cat.uk`. They are no longer tagged 連不上.
 
 ## 0.4.0 — 2026-10-27
 

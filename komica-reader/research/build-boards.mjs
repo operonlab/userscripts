@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const survey = JSON.parse(readFileSync(new URL('survey-result.json', import.meta.url), 'utf8'));
+// boards the portal still lists at an address that died, found again elsewhere and checked by hand
+const moved = new Map(JSON.parse(readFileSync(new URL('moved-boards.json', import.meta.url), 'utf8')).map((m) => [m.old_url, m.new_url]));
 const script = new URL('../komica-reader.user.js', import.meta.url);
 const source = readFileSync(script, 'utf8');
 const statuses = new Map();
@@ -15,6 +17,7 @@ for (const board of survey.boards) {
 const entries = survey.portal.menu_links
   .filter(({ category, href, in_menu_item }) => in_menu_item && category !== '主題選擇' && href && href !== '#' && !/^javascript:/i.test(href))
   .map(({ category, label, href }) => {
+    if (moved.has(href)) return { c: category, l: label, u: moved.get(href), s: 'ok' };
     const status = statuses.get(href);
     return { c: category, l: label, u: href, s: status === 'unreachable' ? 'down' : 'ok', f: finals.get(href) };
   });
