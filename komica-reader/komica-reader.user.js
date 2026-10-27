@@ -491,9 +491,11 @@ html.kr {
   --kr-shadow: 0 10px 34px rgba(0, 0, 0, .14); --kr-r: 12px; --kr-drawer-w: 560px; --kr-side: 0px;
   --kr-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
   --kr-sel: color-mix(in srgb, var(--kr-accent) 13%, var(--kr-card));
+  --kr-id1: #0a6fd6; --kr-id2: #b85c00; --kr-id3: #c4312a;
 }
 html.kr[data-kr-dark] {
   --kr-text: #f5f5f7; --kr-text2: #a1a1a6; --kr-text3: #6e6e73;
+  --kr-id1: #5aa9ff; --kr-id2: #ffa94d; --kr-id3: #ff7b72;
   --kr-bg: #1e1e20; --kr-list-bg: #141416; --kr-card: #232326; --kr-fill: rgba(120, 120, 128, .24); --kr-fill2: rgba(120, 120, 128, .36);
   --kr-sep: rgba(255, 255, 255, .1); --kr-glass: rgba(38, 38, 41, .8); --kr-bar: rgba(30, 30, 32, .86); --kr-shadow: 0 10px 34px rgba(0, 0, 0, .5);
   color-scheme: dark;
@@ -695,7 +697,17 @@ html.kr .kr-post:last-of-type { border-bottom: 0; }
 html.kr .kr-post-title { margin: 6px 0 8px; font: 700 21px/1.3 var(--kr-font); color: var(--kr-text); }
 html.kr .kr-post-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 6px; font-size: 12px; color: var(--kr-text2); }
 html.kr .kr-post-name { font-weight: 600; color: var(--kr-text); }
-html.kr .kr-post-id { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+html.kr .kr-post-id { padding: 0 4px; border: 0; border-radius: 6px; background: none; color: inherit; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+html.kr .kr-post-id:hover { background: var(--kr-fill); }
+html.kr .kr-post-id[data-level="1"] { color: var(--kr-id1); }
+html.kr .kr-post-id[data-level="2"] { color: var(--kr-id2); font-weight: 600; }
+html.kr .kr-post-id[data-level="3"] { color: var(--kr-id3); font-weight: 700; }
+html.kr .kr-id-n { font-family: var(--kr-font); }
+html.kr .kr-post-id[data-level="0"] .kr-id-n { color: var(--kr-text3); }
+html.kr .kr-id-menu { padding: 0 5px; border: 0; border-radius: 6px; background: none; color: var(--kr-text3); font: 12px var(--kr-font); cursor: pointer; }
+html.kr .kr-id-menu:hover { background: var(--kr-fill); color: var(--kr-text); }
+html.kr .kr-pane.kr-id-focusing .kr-post:not(.kr-id-focus) { opacity: .3; }
+html.kr .kr-pane.kr-id-focusing .kr-post.kr-id-focus .kr-post-id { background: var(--kr-sel); }
 html.kr .kr-post-no { margin-left: auto; padding: 0; border: 0; background: none; color: var(--kr-text3); font: inherit; cursor: pointer; }
 html.kr .kr-post-no:hover { color: var(--kr-accent); }
 html.kr .kr-post-text { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
@@ -1567,7 +1579,9 @@ html.kr-portal .kr-side { border-right: 0; }
     for (const art of pane.body.querySelectorAll(':scope > .kr-post:not(.kr-post-op)')) {
       const why = [];
       if (art.dataset.id && f.ids.has(art.dataset.id)) why.push(`ID：${art.dataset.id}`);
-      const text = `${art.querySelector('.kr-post-head')?.textContent || ''}${art.querySelector('.kr-post-text')?.textContent || ''}`;
+      // the words the site matches: name, time, ID and text (not the reader's own badges in the head)
+      const head = ['.kr-post-name', '.kr-post-time'].map((s) => art.querySelector(s)?.textContent || '').join(' ');
+      const text = `${head}${art.dataset.id ? ` ID:${art.dataset.id}` : ''}${art.querySelector('.kr-post-text')?.textContent || ''}`;
       for (const w of f.words) if (text.includes(w)) why.push(`關鍵字：${w}`);
       if (f.posts[art.dataset.no]?.hidden === true) why.push('已加入隱藏貼文清單');
       art.classList.toggle('kr-hidden', why.length > 0);
@@ -1687,7 +1701,13 @@ html.kr-portal .kr-side { border-right: 0; }
       const head = el('header', { class: 'kr-post-head' });
       head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
       if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
-      if (p.id) head.append(el('span', { class: 'kr-post-id' }, `ID:${p.id}`));
+      if (p.id) {
+        head.append(el('button', { type: 'button', class: 'kr-post-id', 'data-id': p.id, title: '標出這個 ID 在這串的每一篇' }, `ID:${p.id}`));
+        // the site's ID menu (搜尋此 ID、隱藏此 ID): its own script opens it on any such button
+        if (site.kind === 'gaia' && SITE_ID.test(p.id)) {
+          head.append(el('button', { type: 'button', class: 'post-id-menu-toggle kr-id-menu', 'data-post-id': p.id, 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': `ID:${p.id} 的選單`, title: '搜尋此 ID、隱藏此 ID' }, '⋯'));
+        }
+      }
       head.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
       // the site's ▾: its own script picks up any such button and opens its menu on it
       if (p.menu) head.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
@@ -1753,6 +1773,20 @@ html.kr-portal .kr-side { border-right: 0; }
       for (const n of [...from].sort((a, b) => a - b)) foot.append(el('a', { class: 'kr-q', href: `#kr-p${n}`, 'data-no': String(n) }, `>>${n}`));
       art.append(foot);
     }
+    // 同串 ID, as the site used to show it: how many posts each ID has here, coloured by that, once the thread is whole
+    // (a board card holds only the latest replies, and a paged 2cat thread one page); a count that would change under
+    // the reader is not shown
+    if (!note && !posts.more) {
+      const counts = new Map();
+      for (const p of posts) if (p.id) counts.set(p.id, (counts.get(p.id) || 0) + 1);
+      for (const b of articles.map((a) => a.querySelector('.kr-post-id')).filter(Boolean)) {
+        const n = counts.get(b.dataset.id) || 1;
+        b.dataset.level = String(n >= 7 ? 3 : n >= 4 ? 2 : n >= 2 ? 1 : 0);
+        b.append(el('span', { class: 'kr-id-n' }, n > 1 ? ` ×${n}` : ' 單發'));
+      }
+    }
+    const focus = pane.el.dataset.focusId;
+    if (focus) for (const a of articles) a.classList.toggle('kr-id-focus', a.dataset.id === focus);
     pane.body.replaceChildren(...articles, ...(note ? [el('div', { class: 'kr-loading' }, note)] : []));
     if (posts.more) {
       const more = el('button', { type: 'button', class: 'kr-btn kr-more' }, '這串分頁了，這裡是最後一頁 · 載入全部');
@@ -1920,6 +1954,16 @@ html.kr-portal .kr-side { border-right: 0; }
         quoteIntoComposer(Number(no.dataset.no));
         return;
       }
+      // an ID marks its posts in this thread and dims the rest; again, or another thread, and it lets go
+      const idBtn = e.target.closest('.kr-post-id[data-id]');
+      if (idBtn) {
+        const on = pane.dataset.focusId !== idBtn.dataset.id;
+        if (on) pane.dataset.focusId = idBtn.dataset.id;
+        else delete pane.dataset.focusId;
+        pane.classList.toggle('kr-id-focusing', on);
+        for (const a of body.querySelectorAll(':scope > .kr-post')) a.classList.toggle('kr-id-focus', on && a.dataset.id === idBtn.dataset.id);
+        return;
+      }
       const fold = e.target.closest('.kr-fold-toggle');
       if (fold) {
         const art = fold.closest('.kr-post');
@@ -2042,7 +2086,8 @@ html.kr-portal .kr-side { border-right: 0; }
     if (switching) {
       p.full = false;
       p.all = false;
-      p.el.classList.remove('kr-reveal');
+      p.el.classList.remove('kr-reveal', 'kr-id-focusing');
+      delete p.el.dataset.focusId;
       p.body.scrollTop = 0;
       // what the board already shows (the OP and its latest replies) goes up at once; the rest follows the fetch
       const card = document.querySelector(`#threads .thread[data-no="${res}"]`);

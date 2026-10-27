@@ -662,6 +662,64 @@ try {
       await vp.locator('.post-id-toast button').click().catch(() => null);
       await vp.locator('.kr-pane-close').click();
     }
+    // ID tools: 同串 counts only once the thread is whole (the card holds only the latest replies), coloured by the
+    // count; a click marks one ID's posts; the site's ID menu opens from ⋯ and its 隱藏此 ID applies at once.
+    // The last such row: far from the rows opened above, so not fetched ahead already.
+    const ires = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].filter((t) => t.querySelectorAll('.post.reply').length >= 4).pop()?.dataset.no);
+    if (ires) {
+      const hold = new RegExp(`pixmicat\\.php\\?res=${ires}(?!\\d)`);
+      await vp.route(hold, async (r) => {
+        await new Promise((ok) => setTimeout(ok, 3000));
+        await r.continue().catch(() => {});
+      });
+      await vp.locator(`#threads .thread[data-no="${ires}"] .kr-meta-count`).click();
+      await vp.waitForSelector('.kr-pane .kr-post', { timeout: 5000 }).catch(() => null);
+      const early = await vp.evaluate(() => ({ loading: !!document.querySelector('.kr-pane .kr-loading'), badges: document.querySelectorAll('.kr-pane .kr-id-n').length }));
+      await vp.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => {});
+      await vp.unroute(hold);
+      const ids = await vp.evaluate(() => {
+        const arts = [...document.querySelectorAll('.kr-pane .kr-post')];
+        const counts = new Map();
+        for (const a of arts) if (a.dataset.id) counts.set(a.dataset.id, (counts.get(a.dataset.id) || 0) + 1);
+        const ok = arts.filter((a) => a.dataset.id).every((a) => {
+          const n = counts.get(a.dataset.id);
+          const b = a.querySelector('.kr-post-id');
+          return b.querySelector('.kr-id-n')?.textContent.trim() === (n > 1 ? `×${n}` : '單發') && b.dataset.level === String(n >= 7 ? 3 : n >= 4 ? 2 : n >= 2 ? 1 : 0);
+        });
+        return { ok, many: [...counts].filter(([, n]) => n > 1).sort((x, y) => y[1] - x[1])[0] || null, menus: arts.filter((a) => a.dataset.id).every((a) => a.querySelector('.post-id-menu-toggle')?.dataset.postId === a.dataset.id) };
+      });
+      check('pane: 同串 counts appear once the thread is whole, each ID with its count and colour and the site\'s ID menu', early.loading && early.badges === 0 && ids.ok && ids.menus, JSON.stringify({ early, ...ids }));
+      if (ids.many) {
+        await vp.locator(`.kr-pane .kr-post[data-id="${ids.many[0]}"] .kr-post-id`).first().click();
+        const marked = await vp.evaluate(() => {
+          const arts = [...document.querySelectorAll('.kr-pane .kr-post')];
+          return { marked: arts.filter((a) => a.classList.contains('kr-id-focus')).length, dimmed: arts.filter((a) => !a.classList.contains('kr-id-focus') && getComputedStyle(a).opacity === '0.3').length, total: arts.length };
+        });
+        await vp.locator(`.kr-pane .kr-post[data-id="${ids.many[0]}"] .kr-post-id`).first().click();
+        const cleared = await vp.evaluate(() => !document.querySelector('.kr-pane.kr-id-focusing, .kr-pane .kr-id-focus'));
+        check('pane: clicking an ID marks its posts and dims the rest; again lets go', marked.marked === ids.many[1] && marked.dimmed === marked.total - marked.marked && cleared, JSON.stringify({ ...marked, cleared }));
+      }
+      const victimId = await vp.evaluate(() => {
+        const op = document.querySelector('.kr-pane .kr-post-op')?.dataset.id;
+        const a = [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op)')].find((x) => x.dataset.id && x.dataset.id !== op && x.getBoundingClientRect().height > 0);
+        a?.scrollIntoView({ block: 'center' });
+        return a?.dataset.id;
+      });
+      if (victimId) {
+        await vp.waitForTimeout(1000);
+        await vp.locator(`.kr-pane .kr-post[data-id="${victimId}"] .kr-id-menu`).first().click();
+        await vp.waitForTimeout(200);
+        const idMenu = await vp.evaluate(() => ({ open: document.getElementById('post-id-actions')?.hidden === false, label: document.querySelector('#post-id-actions small')?.textContent }));
+        if (idMenu.open) await vp.locator('#post-id-actions button').click();
+        await vp.waitForTimeout(400);
+        const idHid = await vp.evaluate((id) => {
+          const own = [...document.querySelectorAll(`.kr-pane .kr-post:not(.kr-post-op)[data-id="${id}"]`)];
+          return { stored: (JSON.parse(localStorage.getItem('komica_hidden_ids_v1') || '{}').entries || []).some((e) => e.id === id), hidden: own.length > 0 && own.every((a) => a.classList.contains('kr-hidden')) };
+        }, victimId);
+        check('pane: the site\'s ID menu opens from ⋯, and its 隱藏此 ID hides that ID\'s replies at once', idMenu.open && idMenu.label === `ID:${victimId}` && idHid.stored && idHid.hidden, JSON.stringify({ victimId, ...idMenu, ...idHid }));
+      }
+      await vp.locator('.kr-pane-close').click();
+    }
     const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
     // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
     // the second reply, and the last reply on the 隱藏貼文清單
