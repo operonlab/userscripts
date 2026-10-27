@@ -597,6 +597,9 @@ html.kr-md #threads .threadpost .post-head > .post-action-wrap { position: absol
 html.kr .post-menu-toggle { width: 26px; height: 22px; padding: 0; border: 0 !important; border-radius: 999px; background: var(--kr-fill) !important; color: var(--kr-text2) !important;
   font: 14px/22px var(--kr-font); text-align: center; cursor: pointer; }
 html.kr .post-menu-toggle:hover, html.kr .post-menu-toggle[aria-expanded="true"] { background: var(--kr-fill2) !important; color: var(--kr-text) !important; }
+/* the site-shaped context a pane ▾ is wrapped in (siteContext): no box of its own, its data never shown */
+html.kr .kr-site-ctx, html.kr .kr-site-ctx > .post { display: contents !important; }
+html.kr .kr-site-ctx [hidden] { display: none !important; }
 html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
 html.kr .postvote-up-wrap { border-right-color: var(--kr-sep); }
 html.kr .postvote-btn { color: inherit; }
@@ -1445,7 +1448,7 @@ html.kr-portal .kr-side { border-right: 0; }
       const fileLink = post.querySelector('.file-text a[href]');
       const src = holder?.getAttribute('data-image-original') || fileLink?.getAttribute('href') || '';
       const info = (post.querySelector('.file-text')?.textContent || '').replace(/^\s*檔名[:：]\s*/, '').trim();
-      const propose = post.querySelector('.category a.tagproposal-open')?.getAttribute('data-no') || '';
+      const propose = post.querySelector('.category a.tagproposal-open')?.getAttribute('href') || '';
       const report = post.querySelector('.post-menu-toggle[data-report-url]')?.getAttribute('data-report-url') || '';
       return {
         no: Number(post.getAttribute('data-no')),
@@ -1453,6 +1456,7 @@ html.kr-portal .kr-side { border-right: 0; }
         title: head?.querySelector('.title')?.textContent.trim() || '',
         name: head?.querySelector('.name')?.textContent.trim() || '',
         time: shortTime(head?.querySelector('.now')?.textContent || '', new Date()) || '',
+        stamp: head?.querySelector('.now')?.textContent.trim() || '',
         // the site moves the ID out of .now into .id[data-id] once its script runs; a fetched page still has it in .now
         id: head?.querySelector('.id')?.getAttribute('data-id') || /ID:\s*([A-Za-z0-9./+]+)/.exec(head?.querySelector('.now')?.textContent || headText)?.[1] || '',
         media: src
@@ -1468,7 +1472,7 @@ html.kr-portal .kr-side { border-right: 0; }
         quote: post.querySelector('.quote'),
         vote: readVote(post),
         tags: readTags(post),
-        propose: /^\d+$/.test(propose) ? propose : null,
+        propose: /^pixmicat\.php\?mode=module&load=mod_tagproposal&view=form&no=\d+$/.test(propose) ? propose : null,
         menu: /^pixmicat\.php\?mode=module&load=mod_report&action=report&res=\d+$/.test(report) ? report : null,
       };
     });
@@ -1694,6 +1698,7 @@ html.kr-portal .kr-side { border-right: 0; }
   function renderPosts(res, posts, note) {
     const pane = state.pane;
     const byNo = new Set(posts.map((p) => p.no));
+    pane.posts = new Map(posts.map((p) => [p.no, p]));
     const backs = new Map();
     const articles = posts.map((p) => {
       const art = el('article', { class: `kr-post${p.op ? ' kr-post-op' : ''}`, id: `kr-p${p.no}`, 'data-no': String(p.no) });
@@ -1749,11 +1754,9 @@ html.kr-portal .kr-side { border-right: 0; }
       art.append(text);
       if (p.tags?.length) {
         const tags = el('div', { class: 'kr-tags' });
-        for (const t of p.tags) tags.append(el('a', { class: 'kr-tag', href: t.href }, t.name));
-        if (p.propose) {
-          const href = `pixmicat.php?mode=module&load=mod_tagproposal&view=form&no=${p.propose}`;
-          tags.append(el('a', { class: 'kr-tag-propose tagproposal-open', 'data-no': p.propose, href, target: '_blank', rel: 'noopener' }, '建議追加／移除標籤'));
-        }
+        // a new tab: the open thread and a draft in the form stay where they are
+        for (const t of p.tags) tags.append(el('a', { class: 'kr-tag', href: t.href, target: '_blank', rel: 'noopener' }, t.name));
+        if (p.propose) tags.append(el('a', { class: 'kr-tag-propose tagproposal-open', 'data-no': String(p.no), href: p.propose, target: '_blank', rel: 'noopener' }, '建議追加／移除標籤'));
         art.append(tags);
       }
       if (p.vote) {
@@ -1923,6 +1926,11 @@ html.kr-portal .kr-side { border-right: 0; }
       setTimeout(filterPane);
     });
     window.addEventListener('storage', () => filterPane());
+    // capture: on the way down, before the site's own handler on the button reads its surroundings
+    body.addEventListener('click', (e) => {
+      const btn = e.target.closest?.('.kr-post .post-menu-toggle');
+      if (btn) siteContext(btn);
+    }, true);
     // the site's own menus hide a post or an ID in this tab (and its toast undoes it): the pane follows at once
     document.addEventListener('click', (e) => e.target.closest?.('.post-action-menu, #post-id-actions, .post-id-toast') && setTimeout(filterPane));
 
@@ -2000,6 +2008,8 @@ html.kr-portal .kr-side { border-right: 0; }
       for (const v of copy.querySelectorAll('video')) v.removeAttribute('autoplay');
       // a player open in the post would load and play a second time in the preview
       for (const f of copy.querySelectorAll('iframe')) f.remove();
+      // the site's own scripts bind any ▲▼, ▾ or ID-menu button they find, a preview's copy included: it is a look only
+      for (const n of copy.querySelectorAll('.kr-vote, .kr-site-ctx, .post-menu-toggle, .post-id-menu-toggle')) n.remove();
       preview.replaceChildren(copy);
       preview.hidden = false;
       const r = q.getBoundingClientRect();
@@ -2026,6 +2036,30 @@ html.kr-portal .kr-side { border-right: 0; }
   function selectCard(res) {
     for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
     document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-selected');
+  }
+
+  // the site's ▾ reads its post from the page around the button: .thread, .post/.reply/.threadpost and their .title,
+  // .name, .now, .quote and img (library-ui.js extractPostData, its copy link, 隱藏此討論串 for the first .post). A pane
+  // post is the reader's own markup, so before the menu opens there the button is wrapped, once, in that context:
+  // hidden, built from the post as the reader read it
+  function siteContext(btn) {
+    const pane = state.pane;
+    const p = pane?.posts?.get(Number(btn.closest('.kr-post')?.dataset.no));
+    if (!p || !pane.res || btn.closest('.kr-site-ctx')) return;
+    const thread = el('span', { class: 'thread kr-site-ctx', 'data-no': String(pane.res) });
+    // to the site a thread's first .post is its OP: a reply's context starts with the OP's number
+    if (!p.op) thread.append(el('span', { class: 'post threadpost', 'data-no': String(pane.res), hidden: '' }));
+    const post = el('span', { class: `post ${p.op ? 'threadpost' : 'reply'}`, 'data-no': String(p.no) });
+    const data = el('span', { hidden: '' });
+    if (p.op) data.append(el('span', { class: 'title' }, p.title || ''));
+    data.append(el('span', { class: 'name' }, p.name || '無名'), el('span', { class: 'now' }, p.stamp || p.time || ''));
+    const quote = el('span', { class: 'quote' });
+    if (p.quote) quote.append(...cleanQuote(p.quote).childNodes);
+    data.append(quote);
+    if (p.media?.thumb && webUrl(p.media.thumb, location.href)) data.append(el('img', { src: p.media.thumb, alt: '' }));
+    btn.replaceWith(thread);
+    post.append(data, btn);
+    thread.append(post);
   }
 
   // a post's words, line by line, without what the site puts inside its text box (its ▲▼, the fold notice) and
@@ -2338,10 +2372,12 @@ html.kr-portal .kr-side { border-right: 0; }
     );
   }
 
+  let siteMenuEsc = false;
   function onKey(e) {
     if (e.isComposing || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const { form } = composer;
     if (e.key === 'Escape') {
+      if (siteMenuEsc) return;
       const box = document.querySelector('.kr-lightbox');
       if (box) box.remove();
       else if (form && form.dataset.krState === 'expanded') collapse();
@@ -2376,6 +2412,9 @@ html.kr-portal .kr-side { border-right: 0; }
     }
     watchTheme();
     setupComposer();
+    // an Esc that shuts one of the site's own menus (▾, ID) is for that menu, not for the thread: noted on the way
+    // down, before the site's handler has shut it
+    window.addEventListener('keydown', (e) => (siteMenuEsc = e.key === 'Escape' && !!document.querySelector('.post-action-menu:not([hidden]), #post-id-actions:not([hidden])')), true);
     document.addEventListener('keydown', onKey);
     if (composer.resto) {
       root.classList.add('kr-thread');

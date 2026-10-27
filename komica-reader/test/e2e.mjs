@@ -615,7 +615,10 @@ try {
     }
     // an untitled thread is named by its first words; the ▲▼ the site keeps inside the text box are not words
     const titles = [];
-    for (const res of await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].filter((t) => /^(無題|無標題)?$/.test(t.querySelector('.threadpost .title')?.textContent.trim() || '')).slice(0, 3).map((t) => t.dataset.no))) {
+    for (const res of await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].filter((t) => /^(無題|無標題)?$/.test(t.querySelector('.threadpost .title')?.textContent.trim() || ''))
+      // the fewest words first: an OP with no text of its own is the case where the ▲▼ would be its only line
+      .map((t) => { const q = t.querySelector('.threadpost .quote')?.cloneNode(true); q?.querySelector('.postvote-slot')?.remove(); return [t.dataset.no, (q?.textContent || '').trim().length]; })
+      .sort((a, b) => a[1] - b[1]).slice(0, 3).map(([no]) => no))) {
       await vp.locator(`#threads .thread[data-no="${res}"] .kr-meta-count`).click();
       await vp.waitForTimeout(400);
       titles.push(await vp.evaluate(() => document.querySelector('.kr-pane-title').textContent));
@@ -635,6 +638,9 @@ try {
     // 隱藏此留言 (stored by the site, nothing sent) hides that reply in the pane at once
     const mres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 2 && t.querySelector('.threadpost .post-menu-toggle'))?.dataset.no);
     if (mres) {
+      // the site shuts its menu on any scroll: bring the row into view and let it settle before the click
+      await vp.evaluate((r) => document.querySelector(`#threads .thread[data-no="${r}"]`).scrollIntoView({ block: 'center' }), mres);
+      await vp.waitForTimeout(1000);
       await vp.locator(`#threads .thread[data-no="${mres}"] .threadpost .post-menu-toggle`).click();
       await vp.waitForTimeout(300);
       const rowMenu = await vp.evaluate(() => ({ menu: document.querySelector('.post-action-menu')?.hidden === false, pane: document.documentElement.classList.contains('kr-pane-open') }));
@@ -660,6 +666,41 @@ try {
       check('pane: every post has the site\'s ▾; its 隱藏此留言 hides that reply in the pane at once', mine.posts > 0 && mine.withMenu === mine.posts && /隱藏此留言/.test(label) && hid.stored && hid.inPane, JSON.stringify({ ...mine, label, ...hid }));
       // undo through the site's toast, so the checks after this one start from the reader's own settings
       await vp.locator('.post-id-toast button').click().catch(() => null);
+      await vp.waitForTimeout(400);
+      // what the site's ▾ reads from a pane post: 加入圖書館 stores this reply of this thread with its own words (in
+      // this browser's storage only), 複製 copies this thread's link to it, and the OP's menu offers 隱藏此討論串
+      const lib = await vp.evaluate(() => {
+        const res = Number(document.querySelector('.kr-pane .kr-post-op')?.dataset.no);
+        const a = [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op)')].filter((x) => x.getBoundingClientRect().height > 0 && x.querySelector('.kr-post-text')?.textContent.trim())[1];
+        navigator.clipboard.writeText = async (t) => {
+          window.__copied = t;
+        };
+        return { res, no: a?.dataset.no, name: a?.querySelector('.kr-post-name')?.textContent, words: (a?.querySelector('.kr-post-text')?.textContent || '').replace(/\s+/g, '').slice(0, 10) };
+      });
+      const openMenu = async (sel) => {
+        await vp.evaluate((s) => document.querySelector(s)?.closest('.kr-post')?.scrollIntoView({ block: 'center' }), sel);
+        await vp.waitForTimeout(1200);
+        await vp.locator(sel).click();
+        await vp.waitForTimeout(200);
+      };
+      if (lib.no) {
+        await openMenu(`.kr-pane .kr-post[data-no="${lib.no}"] .post-menu-toggle`);
+        await vp.locator('.post-action-menu:not([hidden]) .post-action-library').click().catch(() => null);
+        await vp.waitForTimeout(300);
+        const saved = await vp.evaluate((no) => (JSON.parse(localStorage.getItem('komica_my_library_v1') || '{}').entries || []).find((e) => String(e.no) === String(no)) || null, lib.no);
+        await openMenu(`.kr-pane .kr-post[data-no="${lib.no}"] .post-menu-toggle`);
+        await vp.locator('.post-action-menu:not([hidden]) .post-action-copy').click().catch(() => null);
+        await vp.waitForTimeout(300);
+        const copied = await vp.evaluate(() => window.__copied || '');
+        check('pane ▾: 加入圖書館 stores this reply of this thread with its own name and words; 複製 copies its link',
+          !!saved && Number(saved.threadNo) === lib.res && saved.type === 'reply' && saved.name === lib.name && String(saved.snippet || '').replace(/\s+/g, '').includes(lib.words) && copied.endsWith(`pixmicat.php?res=${lib.res}#r${lib.no}`),
+          JSON.stringify({ lib, saved, copied }));
+      }
+      await openMenu('.kr-pane .kr-post-op .post-menu-toggle');
+      const opLabel = await vp.evaluate(() => document.querySelector('.post-action-menu:not([hidden]) .post-action-hide')?.textContent || '');
+      await vp.keyboard.press('Escape');
+      const afterEsc = await vp.evaluate(() => ({ menu: document.querySelector('.post-action-menu')?.hidden === false, pane: document.documentElement.classList.contains('kr-pane-open') }));
+      check('pane ▾: the OP\'s menu offers 隱藏此討論串; Esc shuts the menu, not the thread', /隱藏此討論串/.test(opLabel) && !afterEsc.menu && afterEsc.pane, JSON.stringify({ opLabel, ...afterEsc }));
       await vp.locator('.kr-pane-close').click();
     }
     // ID tools: 同串 counts only once the thread is whole (the card holds only the latest replies), coloured by the
