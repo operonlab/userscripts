@@ -665,6 +665,8 @@ html.kr .kr-post-media img { cursor: zoom-in; }
 html.kr .kr-player-start, html.kr .kr-player { display: block; width: min(560px, 100%); max-height: 70vh; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }
 html.kr .kr-player-start { background: #000 center / contain no-repeat; color: #fff; font-size: 40px; cursor: pointer; text-shadow: 0 2px 12px rgba(0, 0, 0, .8); }
 html.kr .kr-player { background: #000; }
+html.kr .kr-post-media:has(img[data-page])::after { content: '▶'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  color: #fff; font-size: 32px; text-shadow: 0 2px 12px rgba(0, 0, 0, .8); pointer-events: none; }
 html.kr .kr-post-file { margin-top: 4px; font-size: 11px; color: var(--kr-text3); }
 html.kr .kr-spoiler img, html.kr .kr-spoiler video { filter: blur(28px) saturate(.6); pointer-events: none; }
 html.kr .kr-spoiler-btn { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 10px; background: rgba(0, 0, 0, .25); color: #fff;
@@ -1301,7 +1303,8 @@ html.kr-portal .kr-side { border-right: 0; }
   function mediaBase() {
     if (site.mediaBase) return site.mediaBase;
     const dir = location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '');
-    const bases = [...document.querySelectorAll('#threads a.imglink[href*="/src/"], #threads a[href*="/src/"]')].map((a) => fileBase(a.getAttribute('href'), location.href)).filter(Boolean);
+    // file links only: a link someone wrote in a post's text is not where the board keeps its files
+    const bases = [...document.querySelectorAll('#threads a[href*="/src/"]')].filter((a) => !a.closest('.quote')).map((a) => fileBase(a.getAttribute('href'), location.href)).filter(Boolean);
     // the board's own directory on whichever host serves it beats a link into some other board's files
     const base = bases.find((b) => new URL(b).pathname === dir) || bases[0];
     if (base) return (site.mediaBase = base);
@@ -1323,7 +1326,7 @@ html.kr-portal .kr-side { border-right: 0; }
   function readPixmicatPost(post) {
     const head = headTextOf(post);
     const stamp = STAMP.exec(head);
-    const fileA = own(post, 'a[href*="/src/"]');
+    const fileA = [...post.querySelectorAll('a[href*="/src/"]')].find((n) => n.closest('.post') === post && !n.closest('.quote')) || null;
     const imglink = own(post, 'a.imglink[title]');
     const img = (fileA || imglink)?.querySelector('img') || own(post, 'img.img');
     let src = fileA?.getAttribute('href') || '';
@@ -1412,16 +1415,17 @@ html.kr-portal .kr-side { border-right: 0; }
       node = el('video', { controls: '', preload: 'metadata', playsinline: '', src: m.src });
       if (m.thumb) node.poster = m.thumb;
       // 2cat's 18禁 boards answer a video link with their own player page, not the file, and a <video> gives up on
-      // it (MEDIA_ERR_SRC_NOT_SUPPORTED): offer that page instead
-      node.addEventListener('error', () => webUrl(m.src, location.href) && node.replaceWith(playerPage(m)), { once: true });
+      // it as MEDIA_ERR_SRC_NOT_SUPPORTED (4): offer that page instead. A network or decode error is not that.
+      node.addEventListener('error', () => node.error?.code === 4 && boardPage(m.src) && node.replaceWith(playerPage(m)), { once: true });
     } else {
       node = el('img', { src: m.src, alt: '', loading: 'lazy', decoding: 'async' });
       node.dataset.full = m.src;
-      // the original did not load. gaia syncs uploads to its image host in the background, and until then only the
-      // thumbnail exists; 2cat's 18禁 boards answer a GIF link with their own viewer page, which a frame can show
+      // the original did not load: show the thumbnail. gaia syncs uploads to its image host in the background, and
+      // until then only the thumbnail exists; 2cat's 18禁 boards answer a GIF link with their own viewer page, which
+      // a click then opens in a frame instead of the lightbox
       node.addEventListener('error', () => {
-        if (site.kind === 'pixmicat' && webUrl(m.src, location.href)) node.replaceWith(playerPage(m));
-        else if (m.thumb && node.getAttribute('src') !== m.thumb) node.setAttribute('src', m.thumb);
+        if (m.thumb && node.getAttribute('src') !== m.thumb) node.setAttribute('src', m.thumb);
+        if (site.kind === 'pixmicat' && boardPage(m.src)) node.dataset.page = m.src;
       }, { once: true });
     }
     // images reserve their box from the file line; videos take their own size (the line can be off for them)
@@ -1435,16 +1439,25 @@ html.kr-portal .kr-side { border-right: 0; }
     return box;
   }
 
-  // the board's own player, loaded on a click so that a thread of videos does not start playing all at once
+  // only the board's own file store is framed, never an address a post supplies
+  function boardPage(src) {
+    const base = fileBase(src, location.href);
+    return !!base && webUrl(src, location.href) && new URL(base).origin === new URL(mediaBase()).origin;
+  }
+
+  // the board's player page; sandboxed: it runs its own script but cannot take the window anywhere or open forms
+  function playerFrame(src, aspect) {
+    const frame = el('iframe', { class: 'kr-player', src, title: '影片', allow: 'autoplay; fullscreen', allowfullscreen: '', sandbox: 'allow-scripts allow-same-origin' });
+    if (aspect) frame.style.aspectRatio = aspect;
+    return frame;
+  }
+
+  // loaded on a click so that a thread of videos does not start playing all at once
   function playerPage(m) {
     const start = el('button', { type: 'button', class: 'kr-player-start', title: '用網站自己的播放器開啟' }, '▶');
     if (m.thumb) start.style.backgroundImage = `url(${JSON.stringify(m.thumb)})`;
     if (m.dims) start.style.aspectRatio = `${m.dims.w} / ${m.dims.h}`;
-    start.addEventListener('click', () => {
-      const frame = el('iframe', { class: 'kr-player', src: m.src, title: '影片', allow: 'autoplay; fullscreen', allowfullscreen: '' });
-      frame.style.aspectRatio = start.style.aspectRatio;
-      start.replaceWith(frame);
-    });
+    start.addEventListener('click', () => start.replaceWith(playerFrame(m.src, start.style.aspectRatio)));
     return start;
   }
 
@@ -1658,6 +1671,10 @@ html.kr-portal .kr-side { border-right: 0; }
         return;
       }
       const img = e.target.closest('.kr-post-media img');
+      if (img?.dataset.page) {
+        img.replaceWith(playerFrame(img.dataset.page, img.naturalWidth ? `${img.naturalWidth} / ${img.naturalHeight}` : ''));
+        return;
+      }
       if (img) openLightbox(img.dataset.full || img.src);
     });
 
@@ -1670,6 +1687,8 @@ html.kr-portal .kr-side { border-right: 0; }
       const copy = post.cloneNode(true);
       copy.removeAttribute('id');
       for (const v of copy.querySelectorAll('video')) v.removeAttribute('autoplay');
+      // a player open in the post would load and play a second time in the preview
+      for (const f of copy.querySelectorAll('iframe')) f.remove();
       preview.replaceChildren(copy);
       preview.hidden = false;
       const r = q.getBoundingClientRect();
