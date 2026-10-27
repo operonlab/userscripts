@@ -241,10 +241,12 @@ try {
     open: document.documentElement.classList.contains('kr-pane-open'),
     pane: getComputedStyle(document.querySelector('.kr-pane')).display,
     bodyRight: getComputedStyle(document.body).marginRight,
-    restoDisabled: document.querySelector('#postform_main input[name="resto"]').disabled,
     selected: !!document.querySelector('#threads .thread.kr-selected'),
   }));
-  check('pane: Esc again closes the thread and the pane; the list takes the width back; the form is 發新串 again', !closed.open && closed.pane === 'none' && closed.bodyRight === '0px' && closed.restoDisabled && !closed.selected, JSON.stringify(closed));
+  const kept = await page.evaluate(() => ({ disabled: document.querySelector('#postform_main input[name="resto"]').disabled, value: document.querySelector('#postform_main input[name="resto"]').value }));
+  check('pane: Esc again closes the thread and the pane; the list takes the width back', !closed.open && closed.pane === 'none' && closed.bodyRight === '0px' && !closed.selected, JSON.stringify(closed));
+  // the quote is an unsent draft: it stays a reply to the thread it was written in
+  check('composer: an unsent draft keeps replying to its thread after the thread closes', !kept.disabled && kept.value === String(target), JSON.stringify(kept));
 
   // thumbnail, [回應], j
   const thumb = page.locator(`#threads .thread[data-no="${target}"] .threadpost .file-thumb img`);
@@ -255,20 +257,57 @@ try {
     check('list: an OP thumbnail opens the thread rather than expanding the image in the row', t.open && !t.expanded, JSON.stringify(t));
     await page.keyboard.press('Escape');
   }
-  const rlink = await page.evaluate(() => document.querySelector('#threads .rlink a')?.getAttribute('href'));
+  // another thread than the one the draft is for
+  const rlink = await page.evaluate((t) => [...document.querySelectorAll('#threads .rlink a')].map((a) => a.getAttribute('href')).find((h) => !new RegExp(`res=${t}(?!\\d)`).test(h)), target);
   if (rlink) {
     const res = rlink.match(/res=(\d+)/)[1];
     // [回應] is hidden in the list (the row opens the thread); a synthetic click still exercises the link interception
     await page.evaluate((h) => document.querySelector(`#threads .rlink a[href="${h}"]`).click(), rlink);
     const ok = await page.waitForFunction((r) => document.querySelector('.kr-pane-sub').textContent.includes(`No.${r}`), res, { timeout: 5000 }).then(() => true, () => false);
     check('list: a thread link opens the pane instead of leaving the board', ok && page.url() === urlBefore, `res=${res}`);
+    const still = await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').value);
+    check('composer: opening another thread does not move an unsent draft', Number(res) !== target && still === String(target), JSON.stringify({ resto: still, open: res, draftFor: target }));
     await page.keyboard.press('Escape');
   }
+  // an emptied box lets the form follow the open thread again
+  await page.evaluate(() => (document.getElementById('fcom').value = ''));
   await page.locator('.kr-toolbar-title').click();
   await page.keyboard.press('j');
   const keyRes = await page.evaluate(() => document.querySelector('#threads .thread.kr-selected')?.dataset.no);
   const keyOpen = !!keyRes && (await page.waitForFunction((r) => document.querySelector('.kr-pane-sub').textContent.includes(`No.${r}`), keyRes, { timeout: 5000 }).then(() => true, () => false));
   check('list: j selects the next row and the pane follows', keyOpen, `res=${keyRes}`);
+  check('composer: with the box empty, the form replies to the thread that opens', (await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').value)) === keyRes, `res=${keyRes}`);
+  await page.keyboard.press('Escape');
+  check('composer: with the box empty, closing the thread makes the form 發新串 again', await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').disabled));
+
+  // the post verdict, driven without posting anything: new FormData(form) fires formdata as a real submit does,
+  // and the hidden result frame is handed a page of our own. The text may be cleared only when the post is found.
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta-count`).click();
+  await page.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => null);
+  const newest = await page.evaluate(() => Math.max(...[...document.querySelectorAll('[data-no]')].map((n) => Number(n.dataset.no)).filter(Number.isFinite)));
+  const threadPage = (posts) => `<div id="threads"><div class="thread" data-no="${target}"><div class="post threadpost" data-no="${target}"><div class="quote">OP</div></div>${posts.map(([no, text]) => `<div class="post reply" data-no="${no}"><div class="quote">${text}</div></div>`).join('')}</div></div>`;
+  const verdict = (text, html, ms = 10000) => page.evaluate(async ({ text, html, ms }) => {
+    const ta = document.getElementById('fcom');
+    const status = () => document.querySelector('#postform_main .kr-composer-status').textContent;
+    ta.value = text;
+    new FormData(document.getElementById('postform_main'));
+    const sending = status();
+    document.querySelector('iframe[name="kr-sink"]').srcdoc = html;
+    const end = Date.now() + ms;
+    while (status() === '送出中⋯' && Date.now() < end) await new Promise((r) => setTimeout(r, 200));
+    return { sending, status: status(), kept: ta.value === text };
+  }, { text, html, ms });
+  const stamp = `e2e ${Date.now()}`;
+  const errorPage = await verdict(stamp, '<p>錯誤：驗證失敗，請重新整理。</p>');
+  check('posting: an error page keeps the text and says it cannot tell', errorPage.sending === '送出中⋯' && errorPage.kept && errorPage.status.includes('看不出'), JSON.stringify(errorPage));
+  const oldMatch = await verdict('推', threadPage([[newest, '推']]));
+  check('posting: an older post with the same short text is not proof — the text stays', oldMatch.kept && oldMatch.status.includes('看不出'), JSON.stringify({ ...oldMatch, newest }));
+  const reads = await verdict(stamp, '<script>var here = location.href;</script><p>錯誤</p>');
+  check('posting: a result page that only reads its address is not taken for a redirect', reads.kept && reads.status.includes('看不出'), JSON.stringify(reads));
+  const stuck = await verdict(stamp, '<meta http-equiv="refresh" content="999"><p>轉址中</p>', 20000);
+  check('posting: a redirect that never arrives ends in "cannot tell", text kept', stuck.kept && stuck.status.includes('看不出'), JSON.stringify(stuck));
+  const landed = await verdict(stamp, threadPage([[newest + 1, stamp]]));
+  check('posting: the post found on the page it landed on, newer than anything known, clears the text', !landed.kept && landed.status === '已送出', JSON.stringify(landed));
   await page.keyboard.press('Escape');
 
   // dark appearance follows the system while the site theme is 預設

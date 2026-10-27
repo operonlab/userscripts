@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -204,4 +204,39 @@ test('2cat image lines give their size too', () => {
   assert.deepEqual(plain(fileDims('JPG - 170 KB - 960x1280')), { w: 960, h: 1280 });
   assert.deepEqual(plain(fileDims('1787443496798.jpg-(806 KB, 4032x3024)')), { w: 4032, h: 3024 });
   assert.equal(fileDims('1793029484099.jpg'), null);
+});
+
+test('a result page that only reads its address is not a redirect', () => {
+  for (const sends of ["location.href = '/00b/'", 'window.location="index.htm"', "document.location.href='x'", "location.replace('x')", 'location.assign(u)', 'top.location = u']) {
+    assert.equal(assignsLocation(sends), true, sends);
+  }
+  for (const reads of ['var u = location.href;', "if (location.href == 'x') {}", 'ga("send", location.href)', "location.hash = 'top'", 'x.location.search']) {
+    assert.equal(assignsLocation(reads), false, reads);
+  }
+});
+
+test('a post is confirmed only by a newer post holding what was sent', () => {
+  const posts = [{ no: 100, text: '推' }, { no: 101, text: '>>100 同意' }, { no: 105, text: '新的 一則\n回覆' }];
+  assert.equal(confirmPosted(posts, { after: 101, probe: '新的一則' }), true);
+  assert.equal(confirmPosted(posts, { after: 101, probe: '推' }), false); // an older 推 proves nothing
+  assert.equal(confirmPosted(posts, { after: 105, probe: '新的一則' }), false); // nothing newer than what was known
+  assert.equal(confirmPosted(posts, { after: 0, probe: '推' }), false); // nothing known when sent: no verdict
+  assert.equal(confirmPosted(posts, { after: 101, probe: '' }), true); // an image-only reply: any newer post
+});
+
+test('post links and images may go to the web only, as the browser parses them', () => {
+  const base = 'https://gaia.komica1.org/00b/index.htm';
+  for (const ok of ['https://example.org/', 'http://x.y/z', '#r123', 'pixmicat.php?res=1', '//cdn.example.org/a.png']) assert.equal(webUrl(ok, base), true, ok);
+  for (const bad of ['javascript:alert(1)', 'java\tscript:alert(1)', '\x01javascript:alert(1)', ' JaVaScRiPt:alert(1)', 'data:text/html,x', 'vbscript:x', 'mailto:a@b.c', 'http://[']) {
+    assert.equal(webUrl(bad, base), false, JSON.stringify(bad));
+  }
+});
+
+test("another board's later pages and threads count as that board", () => {
+  const more = [...boards, { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok', f: 'https://2cat.org/career/' }, { c: '桌布', l: '二次壁', u: 'https://2cat.org/~wallpaper/', s: 'ok', f: 'https://2cat.org/wallpaper/?repair' }, { c: '連線板', l: '2CAT', u: 'https://2cat.uk/', s: 'ok' }];
+  for (const href of ['https://2cat.org/career/1.htm', 'https://2cat.org/career/?res=79194&page_num=2', 'https://2cat.org/career/pixmicat.php?page_num=3']) assert.equal(matchBoard(href, more), more[3], href);
+  assert.equal(matchBoard('https://2cat.org/wallpaper/', more), more[4]);
+  assert.equal(matchBoard('https://2cat.org/careers/1.htm', more), null);
+  assert.equal(matchBoard('https://2cat.uk/cellphone/', more), null); // a board below another board's directory is not it
+  assert.equal(matchBoard('https://example.org/model/2.htm', more), more[2]);
 });

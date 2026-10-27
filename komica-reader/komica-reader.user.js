@@ -287,7 +287,18 @@
     const exact = knownBoard(normalized, boards);
     if (exact) return exact;
     const url = new URL(normalized);
-    if (url.origin !== 'https://gaia.komica1.org' || !url.pathname.startsWith('/00b/')) return null;
+    if (url.origin !== 'https://gaia.komica1.org' || !url.pathname.startsWith('/00b/')) {
+      // elsewhere a board's later pages and threads (1.htm, ?page=2, ?res=N) sit in its directory
+      const dir = (value) => {
+        const u = new URL(value);
+        return `${u.origin}${u.pathname.replace(/[^/]*$/, '')}`;
+      };
+      const here = dir(normalized);
+      return boards.find((board) => [board.u, board.f].some((value) => {
+        const n = value && normalizeBoardUrl(value);
+        return !!n && new URL(n).pathname.endsWith('/') && dir(n) === here;
+      })) || null;
+    }
     if (url.pathname === '/00b/pixmicat2.php' && url.searchParams.has('c')) {
       return boards.find((board) => {
         const candidate = new URL(board.u);
@@ -398,8 +409,31 @@
     return line ? line.slice(0, 30) : '';
   }
 
+  // a script that sends the page on assigns the location; one that only reads it (analytics, share buttons) does not
+  function assignsLocation(script) {
+    return /\blocation\s*(?:\.\s*href\s*)?=(?!=)|\blocation\s*\.\s*(?:replace|assign)\s*\(/.test(String(script));
+  }
+
+  // a post is confirmed only by a post newer than any known when it was sent that holds what was sent:
+  // an older post saying 推 too proves nothing
+  function confirmPosted(posts, { after, probe }) {
+    if (!after) return false;
+    const squash = (text) => String(text).replace(/\s+/g, '');
+    return posts.some((p) => p.no > after && (!probe || squash(p.text).includes(squash(probe))));
+  }
+
+  // links and images in post text may go to the web and nowhere else; the URL parser decides, as the browser will
+  // (it drops tabs and leading control characters that a pattern would miss)
+  function webUrl(value, base) {
+    try {
+      return /^https?:$/.test(new URL(value, base).protocol);
+    } catch {
+      return false;
+    }
+  }
+
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -561,6 +595,7 @@ html.kr .kr-composer-status.kr-error { color: #ff453a; }
 html.kr-md.kr-pane-open .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
 html.kr-md .kr-composer.kr-new[data-kr-state="collapsed"] { width: auto; border-radius: 999px; }
 html.kr-md .kr-composer.kr-reply-pane { right: 12px; bottom: 12px; width: calc(var(--kr-drawer-w) - 24px); }
+html.kr-md:not(.kr-pane-open) .kr-composer.kr-reply-pane { right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px)); }
 html.kr-md .kr-composer.kr-reply-pane[data-kr-state="expanded"] { max-height: 70vh; }
 html.kr-md .kr-composer.kr-reply-pane[data-kr-state="collapsed"] .kr-composer-toggle { font-weight: 400; color: var(--kr-text2); }
 html.kr-thread .kr-composer.kr-reply { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: 820px; margin: 0 auto; }
@@ -925,7 +960,8 @@ html.kr-portal .kr-side { border-right: 0; }
 
   // ---- composer: the site's own #postform_main, made to float. It is never moved, cloned or display:none'd:
   // the Turnstile frame inside it would reload and drop its token.
-  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, posting: false, sent: '', category: '' };
+  // sending: what was sent, to where, and the newest post number known then; the verdict reads that, not the form as it is now
+  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, sending: null, timer: null, category: '' };
 
   function setupComposer() {
     const form = document.getElementById('postform_main');
@@ -957,11 +993,13 @@ html.kr-portal .kr-side { border-right: 0; }
       const sink = el('iframe', { name: 'kr-sink', title: '發文結果', hidden: '' });
       document.body.append(sink);
       form.target = 'kr-sink';
-      // formdata fires only once the site's own submit checks have let the post through
+      // formdata fires once the site's own submit checks have let the post through, and also for any script that
+      // builds a FormData from the form: a page that never comes back ends in "看不出", not in 送出中 for ever
       form.addEventListener('formdata', () => {
-        composer.posting = true;
-        composer.sent = document.getElementById('fcom')?.value || '';
+        const known = [...document.querySelectorAll('[data-no]')].map((n) => Number(n.dataset.no)).filter(Number.isFinite);
+        composer.sending = { mode: composer.mode, target: composer.target, text: document.getElementById('fcom')?.value || '', subject: document.getElementById('fsub')?.value || '', after: Math.max(0, ...known) };
         setStatus('送出中⋯');
+        waitForResult(60000, '等不到回應頁');
       });
       sink.addEventListener('load', () => onPosted(sink));
     }
@@ -984,53 +1022,87 @@ html.kr-portal .kr-side { border-right: 0; }
     }
   }
 
+  function waitForResult(ms, message) {
+    clearTimeout(composer.timer);
+    const sending = composer.sending;
+    composer.timer = setTimeout(() => composer.sending === sending && settle(sending, { kind: 'unknown', message }, null), ms);
+  }
+
   function onPosted(sink) {
-    if (!composer.posting) return;
+    const sending = composer.sending;
+    if (!sending) return;
     let doc = null;
     try {
       doc = sink.contentDocument;
     } catch {
       doc = null;
     }
-    const scripts = [...(doc?.scripts || [])].map((n) => n.textContent).join('\n');
     const outcome = postOutcome({
       readable: !!doc?.body,
       threads: !!doc?.getElementById('threads'),
-      redirect: !!doc?.querySelector('meta[http-equiv="refresh" i]') || /location\s*\.\s*(href|replace|assign)|window\.location\s*=/.test(scripts),
+      redirect: !!doc?.querySelector('meta[http-equiv="refresh" i]') || assignsLocation([...(doc?.scripts || [])].map((n) => n.textContent).join('\n')),
       text: doc?.body?.innerText || '',
     });
-    if (outcome.kind === 'wait') return;
-    composer.posting = false;
+    // a redirect that never arrives ends the wait too
+    if (outcome.kind === 'wait') waitForResult(15000, '回應頁停在轉址');
+    else settle(sending, outcome, doc);
+  }
+
+  // the text is cleared only when the post itself is found: on the page it landed on, or in the refetched thread
+  function settle(sending, outcome, doc) {
+    clearTimeout(composer.timer);
+    composer.sending = null;
     resetTurnstile();
-    if (outcome.kind === 'ok') {
-      posted();
+    const look = { after: sending.after, probe: postedProbe(sending.text) };
+    const textOf = (thread) => readPosts(thread).map((p) => ({ no: p.no, op: p.op, text: p.quote?.textContent || '' }));
+    const unsure = (why) => {
+      // a newer post on its way has the status line now
+      if (composer.sending) return;
+      setStatus(`看不出有沒有送出（${why}）。內容還在框裡，請按 ↻ 或在新分頁確認。`, true);
+    };
+    const landed = outcome.kind === 'ok' ? doc.getElementById('threads') : null;
+    if (landed && site.kind === 'pixmicat') wrapThreads(landed);
+    if (sending.mode === 'reply' && sending.target) {
+      const here = landed?.querySelector(`.thread[data-no="${sending.target}"]`);
+      if (here && confirmPosted(textOf(here), look)) return posted(sending);
+      loadThread(sending.target, true).then(
+        (posts) => (confirmPosted(posts.map((p) => ({ no: p.no, text: p.quote?.textContent || '' })), look) ? posted(sending) : unsure(outcome.message || '串裡找不到這則')),
+        (err) => unsure(err.message),
+      );
       return;
     }
-    // no verdict from the page: in a thread, the thread itself shows whether the reply landed
-    const probe = postedProbe(composer.sent);
-    const unsure = () =>
-      // the text stays in the box: nothing is cleared unless the post is confirmed
-      setStatus(`看不出有沒有送出（${outcome.message}）。內容還在框裡，請按 ↻ 或在新分頁確認。`, true);
-    if (composer.mode === 'reply' && composer.target && probe) {
-      const res = composer.target;
-      loadThread(res, true).then(
-        (posts) => (posts.some((p) => (p.quote?.textContent || '').includes(probe)) ? posted() : unsure()),
-        unsure,
-      );
-    } else {
-      unsure();
+    const ops = landed ? [...landed.querySelectorAll('.thread')].flatMap(textOf).filter((p) => p.op) : [];
+    if (confirmPosted(ops, look)) posted(sending);
+    else unsure(outcome.message || '版面上找不到這串');
+  }
+
+  function posted(sending) {
+    setStatus('已送出');
+    const ta = document.getElementById('fcom');
+    // only what was sent is cleared: text typed since then stays
+    if (ta?.value === sending.text) {
+      ta.value = '';
+      const subject = document.getElementById('fsub');
+      if (subject?.value === sending.subject) subject.value = '';
+      const file = document.getElementById('fupfile');
+      if (file) file.value = '';
+      collapse();
+    }
+    if (sending.mode === 'reply') {
+      if (state.pane?.res === sending.target) openThread(sending.target, { fresh: true });
+      // the emptied form goes back to the open thread, or to 發新串
+      if (hasDraft()) return;
+      if (state.pane?.res) composerReply(state.pane.res);
+      else composerNew();
+    } else if (!hasDraft()) {
+      location.reload();
     }
   }
 
-  function posted() {
-    setStatus('已送出');
-    const ta = document.getElementById('fcom');
-    if (ta) ta.value = '';
-    const file = document.getElementById('fupfile');
-    if (file) file.value = '';
-    collapse();
-    if (composer.mode === 'reply' && composer.target) openThread(composer.target, { fresh: true });
-    else location.reload();
+  // an unsent draft keeps the thread (or the new thread) it was written for, until it is sent, emptied, or
+  // pointed elsewhere by hand (回覆, No.); opening or closing another thread does not move it
+  function hasDraft() {
+    return !!(document.getElementById('fcom')?.value.trim() || document.getElementById('fsub')?.value.trim() || document.getElementById('fupfile')?.files?.length);
   }
 
   function setLabel() {
@@ -1241,15 +1313,21 @@ html.kr-portal .kr-side { border-right: 0; }
     });
   }
 
-  // post text is user content: only the markup a post needs survives the copy
+  // post text is user content: only the markup a post needs survives the copy. Elements are kept (2cat's 推文 are
+  // divs, fonts and tables inside the text); attributes are not, beyond the few listed
+  const DROP = 'script, style, iframe, frame, object, embed, applet, form, input, button, select, textarea, base, meta, link, template, noscript, svg, math, audio, video';
+  const KEEP_ATTRS = new Set(['href', 'src', 'alt', 'title', 'class', 'color', 'size', 'face']);
   function cleanQuote(quote) {
     const q = quote.cloneNode(true);
-    for (const n of q.querySelectorAll('script, style, iframe, object, embed, form, input, button, .postvote-slot, .backquote, .-expand-line, .text-button, .kr-meta')) n.remove();
+    for (const n of q.querySelectorAll(`${DROP}, .postvote-slot, .backquote, .-expand-line, .text-button, .kr-meta`)) n.remove();
     for (const n of q.querySelectorAll('.hide')) n.replaceWith(...n.childNodes);
     for (const n of q.querySelectorAll('*')) {
-      for (const a of [...n.attributes]) if (/^on/i.test(a.name) || a.name === 'style' || a.name === 'id') n.removeAttribute(a.name);
-      if (/^\s*(javascript|data|vbscript):/i.test(n.getAttribute('href') || '')) n.removeAttribute('href');
-      if (/^\s*(javascript|vbscript):/i.test(n.getAttribute('src') || '')) n.removeAttribute('src');
+      if (n.namespaceURI !== 'http://www.w3.org/1999/xhtml') {
+        n.remove();
+        continue;
+      }
+      for (const a of [...n.attributes]) if (!KEEP_ATTRS.has(a.name)) n.removeAttribute(a.name);
+      for (const name of ['href', 'src']) if (n.hasAttribute(name) && !webUrl(n.getAttribute(name), location.href)) n.removeAttribute(name);
     }
     while (q.lastChild && (q.lastChild.nodeName === 'BR' || (q.lastChild.nodeType === 3 && !q.lastChild.data.trim()))) q.lastChild.remove();
     return q;
@@ -1379,8 +1457,14 @@ html.kr-portal .kr-side { border-right: 0; }
       const want = [];
       for (let n = 0; n <= base.last; n++) if (n !== base.page) want.push(n);
       // ponytail: four at a time is polite enough for the few-dozen-page threads seen; a progress note if longer ones appear
+      let failed = false;
       const worker = async () => {
-        while (want.length) for (const p of await fetchThread(res, want.shift(), base.param)) if (!byNo.has(p.no)) byNo.set(p.no, p);
+        try {
+          while (want.length && !failed) for (const p of await fetchThread(res, want.shift(), base.param)) if (!byNo.has(p.no)) byNo.set(p.no, p);
+        } catch (err) {
+          failed = true;
+          throw err;
+        }
       };
       await Promise.all([worker(), worker(), worker(), worker()]);
       return [...byNo.values()].sort((a, b) => b.op - a.op || a.no - b.no);
@@ -1407,7 +1491,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const preview = el('div', { class: 'kr-preview', hidden: '' });
     pane.append(resize, head, body);
     document.body.append(pane, preview);
-    const p = (state.pane = { el: pane, body, title, sub, newtab, preview, res: null, full: false });
+    const p = (state.pane = { el: pane, body, title, sub, newtab, preview, res: null, full: false, seq: 0 });
 
     let width = null;
     try {
@@ -1559,7 +1643,7 @@ html.kr-portal .kr-side { border-right: 0; }
     // opening the pane narrows the list and rewraps every row: keep the chosen row in sight
     if (!wasOpen) document.querySelector(`#threads .thread[data-no="${res}"]`)?.scrollIntoView({ block: 'nearest' });
     setPaneTitle(res);
-    composerReply(res);
+    if (quote || !hasDraft()) composerReply(res);
     if (quote) quoteIntoComposer(quote);
     if (switching) {
       p.full = false;
@@ -1579,24 +1663,30 @@ html.kr-portal .kr-side { border-right: 0; }
       if (post) flashPost(post);
       return;
     }
+    // only the latest request draws: an older one (say the 載入全部 still loading) answering late must not cover it
+    const seq = ++p.seq;
     let posts;
     try {
       posts = await (p.all ? loadWholeThread(res, fresh) : loadThread(res, fresh));
     } catch (err) {
-      if (p.res !== res) return;
+      if (p.res !== res || p.seq !== seq) return;
       const box = el('div', { class: 'kr-pane-error' }, `沒能載入這串：${err.message}`);
       const retry = el('button', { type: 'button', class: 'kr-btn' }, '再試一次');
       retry.addEventListener('click', () => openThread(res, { fresh: true }));
-      const tab = el('a', { class: 'kr-btn', href: `pixmicat.php?res=${res}`, target: '_blank', rel: 'noopener' }, '在新分頁開啟');
+      const tab = el('a', { class: 'kr-btn', href: threadUrl(res), target: '_blank', rel: 'noopener' }, '在新分頁開啟');
       box.append(el('br'), retry, tab);
       p.body.querySelector('.kr-loading')?.remove();
       p.body.append(box);
       return;
     }
-    if (p.res !== res) return;
-    const top = p.body.scrollTop;
+    if (p.res !== res || p.seq !== seq) return;
+    // the post being read stays where it is on screen: the whole thread adds posts above it
+    const view = p.body.getBoundingClientRect().top;
+    const anchor = p.body.scrollTop > 0 ? [...p.body.querySelectorAll('.kr-post')].find((n) => n.getBoundingClientRect().bottom > view) : null;
+    const offset = anchor ? anchor.getBoundingClientRect().top - view : 0;
     renderPosts(res, posts);
-    p.body.scrollTop = top;
+    const again = anchor && p.body.querySelector(`#kr-p${anchor.dataset.no}`);
+    p.body.scrollTop = again ? p.body.scrollTop + again.getBoundingClientRect().top - view - offset : 0;
     p.full = true;
     setPaneTitle(res, posts);
     if (post) flashPost(post);
@@ -1615,9 +1705,10 @@ html.kr-portal .kr-side { border-right: 0; }
     p.res = null;
     p.full = false;
     p.all = false;
+    p.seq++;
     p.body.replaceChildren();
     p.preview.hidden = true;
-    composerNew();
+    if (!hasDraft()) composerNew();
   }
 
   // ---- the board page's own header, folded into a toolbar
