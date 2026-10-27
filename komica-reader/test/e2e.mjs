@@ -258,7 +258,8 @@ try {
     await page.keyboard.press('Escape');
   }
   // another thread than the one the draft is for
-  const rlink = await page.evaluate((t) => [...document.querySelectorAll('#threads .rlink a')].map((a) => a.getAttribute('href')).find((h) => !new RegExp(`res=${t}(?!\\d)`).test(h)), target);
+  // (a [回應] that names a thread: the board can carry one that does not)
+  const rlink = await page.evaluate((t) => [...document.querySelectorAll('#threads .rlink a')].map((a) => a.getAttribute('href') || '').find((h) => /res=\d+/.test(h) && !new RegExp(`res=${t}(?!\\d)`).test(h)), target);
   if (rlink) {
     const res = rlink.match(/res=(\d+)/)[1];
     // [回應] is hidden in the list (the row opens the thread); a synthetic click still exercises the link interception
@@ -1069,6 +1070,54 @@ try {
     check('framed by another site: the board loaded in the frame with the reader', false);
   }
   await fctx.close();
+
+  // a page still arriving shows the reader's frame (the sidebar, a bar, a spinner), never the site's page half laid out:
+  // every frame drawn before the reader has the page has the cover over the list. Measured going to the next page on a
+  // slow line, so the page takes a while to arrive.
+  const bctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW' });
+  await bctx.addInitScript(wrapped);
+  await bctx.addInitScript(() => {
+    const t = (window.__krBoot = { frames: 0, bare: 0, covered: 0, side: 0 });
+    const tick = () => {
+      if (document.querySelector('.kr-toolbar')) return;
+      if (document.body?.childElementCount) {
+        t.frames++;
+        if (document.elementFromPoint(innerWidth * 0.6, innerHeight * 0.5)?.closest('.kr-boot')) t.covered++;
+        else t.bare++;
+        // the sidebar in sight, not only built
+        if (document.elementFromPoint(100, innerHeight * 0.5)?.closest('.kr-side')) t.side++;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await bctx.route(/post_vote\.php/, (r) => (r.request().method() === 'POST' ? r.abort() : r.continue()));
+  const bp = await bctx.newPage();
+  await bp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  await bp.waitForSelector('#page_switch a', { timeout: 20000 }).catch(() => null);
+  const nextHref = await bp.locator('#page_switch a').filter({ hasText: /^1$/ }).first().getAttribute('href').catch(() => null);
+  if (nextHref) {
+    const cdp = await bctx.newCDPSession(bp);
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 200 * 1024, uploadThroughput: 200 * 1024 });
+    await bp.goto(new URL(nextHref, BOARD).href, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => null);
+    await bp.waitForSelector('.kr-toolbar', { timeout: 60000 }).catch(() => null);
+    const boot = await bp.evaluate(() => ({ ...window.__krBoot, coverGone: !document.querySelector('.kr-boot') }));
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    if (boot.frames === 0) console.log(`NOTE  page arriving: no frame was drawn before the reader had the page, so the cover was not exercised ${JSON.stringify(boot)}`);
+    else check('page arriving: the reader\'s frame (sidebar, bar, spinner) covers the site\'s half-laid-out page until the reader has it', boot.bare === 0 && boot.side > 0 && boot.coverGone, JSON.stringify(boot));
+  } else {
+    check('page arriving: the board\'s next page link was found', false);
+  }
+  // a page at a board's address that turns out not to be one (a challenge, an error page): the frame's sidebar goes
+  // and the visit is not kept in 最近
+  await bp.evaluate(() => localStorage.setItem('kr.recent', '[]'));
+  await bp.route(BOARD, (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Just a moment...</title><p>checking your browser</p>' }));
+  await bp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  await bp.waitForTimeout(500);
+  const notBoard = await bp.evaluate(() => ({ side: !!document.querySelector('.kr-side'), cover: !!document.querySelector('.kr-boot'), recent: localStorage.getItem('kr.recent'), text: document.body.innerText.trim() }));
+  await bp.unroute(BOARD);
+  check('not a board after all: the page shows, without the frame\'s sidebar, and is not kept in 最近', !notBoard.side && !notBoard.cover && notBoard.recent === '[]' && notBoard.text.includes('checking your browser'), JSON.stringify(notBoard));
+  await bctx.close();
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);

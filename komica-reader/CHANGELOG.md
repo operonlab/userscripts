@@ -3,6 +3,10 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.4 — 2026-10-27
+
+- **No more flash of the old page between pages.** The reader can lay a page out only once the whole of it has arrived, and until then the browser showed the site's page half laid out, the old look, for a moment on every page change and more on a slow line. Now the reader's frame comes first: on a board the sidebar, a bar with the board's name and a spinner, and the list replaces the spinner when it is ready; on a thread page the bar and the spinner.
+
 ## 0.6.3 — 2026-10-27
 
 - **Votes on 綜合 opened from 2cat.uk.** 2cat.uk shows its boards inside a frame, and the reader's sidebar opened other boards in that same frame, so 綜合 ended up inside 2cat.uk. There the browser blocks 綜合's own cookies as another site's, its vote identity among them, and every ▲▼ came to nothing. Boards on another site now open as the page itself. If a 綜合 board or thread is found inside another site's frame anyway, a line at the top says votes will not count there and opens it as the page. Both need the browser to say which site the frame is in, which Chrome and Safari do and Firefox does not; there it stays as before.

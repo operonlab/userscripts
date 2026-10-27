@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.3
+// @version      0.6.4
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -526,6 +526,17 @@ html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; alig
 /* this board inside another site's frame (2cat.uk's): the browser keeps the site's cookies from it, so votes do nothing */
 html.kr .kr-framed { display: block; margin: 0 0 10px; padding: 6px 12px; border-radius: 999px; background: var(--kr-warn-bg); color: var(--kr-warn-text) !important;
   font: 600 12px var(--kr-font); text-decoration: none; }
+/* a page still arriving: the reader's frame (the sidebar, a bar and a spinner) over the site's page half laid out; the
+   sidebar's glass shows the cover, not the site's colours under it */
+html.kr .kr-boot { position: fixed; z-index: 1000; inset: 0; padding-left: var(--kr-side); box-sizing: border-box; display: flex; flex-direction: column;
+  background: var(--kr-list-bg); font-family: var(--kr-font); }
+html.kr.kr-booting .kr-side { z-index: 1001; }
+html.kr.kr-booting .kr-side-open { z-index: 1002; }
+html.kr .kr-boot-bar { display: flex; align-items: center; min-height: 52px; padding: 10px 18px; box-sizing: border-box; background: var(--kr-bar);
+  border-bottom: .5px solid var(--kr-sep); color: var(--kr-text); font-size: 17px; font-weight: 600; }
+html.kr .kr-boot-spin { margin: auto; width: 28px; height: 28px; box-sizing: border-box; border: 3px solid var(--kr-fill2); border-top-color: var(--kr-accent);
+  border-radius: 50%; animation: kr-spin .8s linear infinite; }
+@keyframes kr-spin { to { transform: rotate(360deg); } }
 html.kr .kr-toolbar-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
 html.kr .kr-toolbar-title { font: 700 17px/1.2 var(--kr-font); overflow: hidden; text-overflow: ellipsis; }
 html.kr .kr-toolbar-sub, html.kr .kr-toolbar #online-counter { font: 12px var(--kr-font) !important; color: var(--kr-text2); margin: 0 !important; }
@@ -840,6 +851,7 @@ html.kr-portal .kr-side { border-right: 0; }
   html.kr .kr-pane-close, html.kr .kr-pane-resize { display: none; }
   html.kr-md .kr-composer.kr-new { right: 16px; }
   html.kr-md .kr-composer.kr-reply-pane { left: 12px; right: 12px; width: auto; }
+  html.kr .kr-boot-bar { padding-left: 52px; }
   html.kr.kr-pane-open #gaia-vote-pause-notice { bottom: 76px !important; }
   html.kr.kr-pane-open .kr-site-scroll { top: auto !important; bottom: 76px !important; }
   html.kr-md #threads .thread.kr-peek .post.reply { margin-left: 0; }
@@ -888,7 +900,11 @@ html.kr-portal .kr-side { border-right: 0; }
     if (!collapsed || typeof collapsed !== 'object' || Array.isArray(collapsed)) collapsed = {};
     if (current && !portal) {
       recent = [current.u, ...recent.filter((url) => url !== current.u)].slice(0, 6);
-      store.set('kr.recent', recent);
+      // kept once the page is a board indeed (the frame puts the sidebar up before it can tell: a challenge or error
+      // page at a board's address is not a visit)
+      const keep = () => document.getElementById('threads') && store.set('kr.recent', recent);
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', keep, { once: true });
+      else keep();
     }
 
     const side = el('aside', { class: 'kr-side', 'aria-label': '板塊導覽' });
@@ -914,6 +930,7 @@ html.kr-portal .kr-side { border-right: 0; }
     let overlay = false;
     let currentExpanded = !!current;
     const applySide = () => {
+      if (!side.isConnected) return;
       const mobile = !portal && window.innerWidth < 900;
       const visible = mobile ? overlay : !hidden;
       root.classList.toggle('kr-side-hidden', !visible);
@@ -1094,7 +1111,8 @@ html.kr-portal .kr-side { border-right: 0; }
     const select = document.getElementById('theme-selector');
     const link = document.querySelector('link.second-style');
     const siteDark = select ? select.value === 'dark.css' : /dark/i.test(link?.getAttribute('href') || '');
-    const siteChose = select ? select.value !== '' : false;
+    // no selector yet (the page still arriving) or at all: the site's dark stylesheet is its choice
+    const siteChose = select ? select.value !== '' : siteDark;
     const dark = siteChose ? siteDark : window.matchMedia('(prefers-color-scheme: dark)').matches;
     root.toggleAttribute('data-kr-dark', dark);
   }
@@ -2332,7 +2350,7 @@ html.kr-portal .kr-side { border-right: 0; }
 
   function initBoard() {
     root.classList.add('kr-md');
-    if (window.name !== 'cont' || window.top === window) setupSidebar(BOARDS);
+    if ((window.name !== 'cont' || window.top === window) && !document.querySelector('.kr-side')) setupSidebar(BOARDS);
     if (isPixmicat(document)) {
       site.kind = 'pixmicat';
       wrapThreads(document.getElementById('threads'));
@@ -2447,7 +2465,47 @@ html.kr-portal .kr-side { border-right: 0; }
     }
   }
 
+  // While the page is still arriving, the reader's frame comes first: a board's sidebar, and a bar with the page's name
+  // and a spinner over the rest, instead of the site's page half laid out. init takes it away once the reader has the
+  // page; one that never finishes arriving shows as it is after a while. The site's own feature pages are left alone.
+  let booting = false;
+  function boot() {
+    if (root.classList.contains('kr-portal') || /[?&]mode=/.test(location.search)) return;
+    booting = true;
+    root.classList.add('kr-booting');
+    const show = () => {
+      if (!booting) return;
+      syncTheme();
+      if (!/[?&]res=/.test(location.search) && (window.name !== 'cont' || window.top === window)) setupSidebar(BOARDS);
+      const cover = el('div', { class: 'kr-boot', role: 'status', 'aria-label': '載入中' });
+      cover.append(el('div', { class: 'kr-boot-bar' }, document.title.trim()), el('div', { class: 'kr-boot-spin' }));
+      document.body.append(cover);
+    };
+    if (document.body) show();
+    else {
+      new MutationObserver((_, mo) => {
+        if (!document.body) return;
+        mo.disconnect();
+        show();
+      }).observe(root, { childList: true });
+    }
+    setTimeout(unboot, 10000);
+  }
+  function unboot() {
+    booting = false;
+    root.classList.remove('kr-booting');
+    document.querySelector('.kr-boot')?.remove();
+  }
+
   function init() {
+    try {
+      setup();
+    } finally {
+      unboot();
+    }
+  }
+
+  function setup() {
     if (root.classList.contains('kr-portal')) {
       root.toggleAttribute('data-kr-dark', window.matchMedia('(prefers-color-scheme: dark)').matches);
       setupSidebar(portalBoards(), true);
@@ -2464,6 +2522,11 @@ html.kr-portal .kr-side { border-right: 0; }
       window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
     } else if (document.getElementById('threads')) {
       initBoard();
+    } else {
+      // not a board after all: the sidebar the frame put up goes
+      document.querySelector('.kr-side')?.remove();
+      document.querySelector('.kr-side-open')?.remove();
+      root.style.removeProperty('--kr-side');
     }
     // 綜合 (the board with votes) inside another site's frame: its votes come to nothing there, so say so and offer the
     // page itself. The portal's own frame is the same site, and its board frame stays put.
@@ -2488,8 +2551,10 @@ html.kr-portal .kr-side { border-right: 0; }
     style.id = 'kr-style';
     style.textContent = CSS;
     (document.head || root).appendChild(style);
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-    else init();
+    if (document.readyState === 'loading') {
+      boot();
+      document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else init();
   }
 
   if (document.documentElement) start();
