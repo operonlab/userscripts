@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.6
+// @version      0.6.7
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -504,6 +504,8 @@ html.kr[data-kr-dark] {
 }
 html.kr body { font-family: var(--kr-font); -webkit-font-smoothing: antialiased; }
 html.kr-md body, html.kr-thread body { background: var(--kr-list-bg) !important; color: var(--kr-text) !important; }
+/* 綜合 pads <html> and paints it cream: a strip above the toolbar, and what a phone shows when pulled past the top */
+html.kr-md, html.kr-thread { padding-top: 0 !important; background: var(--kr-list-bg) !important; }
 html.kr-md #threads a, html.kr-thread #threads a { color: var(--kr-accent); }
 .kr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; min-width: 28px; padding: 0 11px; box-sizing: border-box;
   border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text) !important; font: 500 13px/1 var(--kr-font); text-decoration: none !important;
@@ -652,6 +654,13 @@ html.kr .kr-site-scroll table { border-spacing: 0; }
 html.kr .kr-site-scroll td { height: 6px; padding: 0; font-size: 0; line-height: 0; }
 html.kr .kr-site-scroll a { display: block; width: 34px; height: 34px; border-radius: 999px; background: var(--kr-glass); backdrop-filter: blur(20px);
   box-shadow: var(--kr-shadow); color: var(--kr-text2) !important; font: 13px/34px var(--kr-font); text-align: center; text-decoration: none; }
+/* 2cat's own ↑ ⟳ ↓ on a phone (images it places with inline styles): the same round grey buttons, stacked above the
+   floating form instead of under it */
+html.kr-md img.mobile-navi { left: auto !important; right: 16px !important; width: 34px !important; height: 34px; box-sizing: border-box; padding: 3px;
+  border-radius: 999px; background: var(--kr-glass); box-shadow: var(--kr-shadow); filter: grayscale(1); opacity: 1 !important; }
+html.kr-md img.mobile-navi[title="Bottom"] { bottom: 76px !important; }
+html.kr-md img.mobile-navi[title="Reload"] { bottom: 116px !important; }
+html.kr-md img.mobile-navi[title="Top"] { bottom: 156px !important; }
 /* the site's pager and footer under the list: the same links and text, set as pills and a quiet line; the [ ] around
    the pager's links are typography, sized away rather than removed */
 html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
@@ -749,6 +758,8 @@ html.kr .kr-post:last-of-type { border-bottom: 0; }
 html.kr .kr-post-title { margin: 6px 0 8px; font: 700 21px/1.3 var(--kr-font); color: var(--kr-text); }
 html.kr .kr-post-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 6px; font-size: 12px; color: var(--kr-text2); }
 html.kr .kr-post-name { font-weight: 600; color: var(--kr-text); }
+html.kr :is(.kr-post-who, .kr-post-end) { display: inline-flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+html.kr .kr-post-end { margin-left: auto; }
 html.kr .kr-post-id { padding: 0 4px; border: 0; border-radius: 6px; background: none; color: inherit; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
 html.kr .kr-post-id:hover { background: var(--kr-fill); }
 html.kr .kr-post-id[data-level="1"] { color: var(--kr-id1); }
@@ -760,7 +771,7 @@ html.kr .kr-id-menu { padding: 0 5px; border: 0; border-radius: 6px; background:
 html.kr .kr-id-menu:hover { background: var(--kr-fill); color: var(--kr-text); }
 html.kr .kr-pane.kr-id-focusing .kr-post:not(.kr-id-focus) { opacity: .3; }
 html.kr .kr-pane.kr-id-focusing .kr-post.kr-id-focus .kr-post-id { background: var(--kr-sel); }
-html.kr .kr-post-no { margin-left: auto; padding: 0; border: 0; background: none; color: var(--kr-text3); font: inherit; cursor: pointer; }
+html.kr .kr-post-no { padding: 0; border: 0; background: none; color: var(--kr-text3); font: inherit; cursor: pointer; }
 html.kr .kr-post-no:hover { color: var(--kr-accent); }
 html.kr .kr-post-text { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
 html.kr .kr-post-op .kr-post-text { font-size: 16px; }
@@ -1788,16 +1799,21 @@ html.kr-portal .kr-side { border-right: 0; }
       const head = el('header', { class: 'kr-post-head' });
       head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
       if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
+      // a menu button wraps with what it belongs to: on a phone a dated header breaks, and a ▾ or ⋯ alone on a line reads as nobody's
       if (p.id) {
-        head.append(el('button', { type: 'button', class: 'kr-post-id', 'data-id': p.id, title: '標出這個 ID 在這串的每一篇' }, `ID:${p.id}`));
+        const who = el('span', { class: 'kr-post-who' });
+        who.append(el('button', { type: 'button', class: 'kr-post-id', 'data-id': p.id, title: '標出這個 ID 在這串的每一篇' }, `ID:${p.id}`));
         // the site's ID menu (搜尋此 ID、隱藏此 ID): its own script opens it on any such button
         if (site.kind === 'gaia' && SITE_ID.test(p.id)) {
-          head.append(el('button', { type: 'button', class: 'post-id-menu-toggle kr-id-menu', 'data-post-id': p.id, 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': `ID:${p.id} 的選單`, title: '搜尋此 ID、隱藏此 ID' }, '⋯'));
+          who.append(el('button', { type: 'button', class: 'post-id-menu-toggle kr-id-menu', 'data-post-id': p.id, 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': `ID:${p.id} 的選單`, title: '搜尋此 ID、隱藏此 ID' }, '⋯'));
         }
+        head.append(who);
       }
-      head.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
+      const end = el('span', { class: 'kr-post-end' });
+      end.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
       // the site's ▾: its own script picks up any such button and opens its menu on it
-      if (p.menu) head.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
+      if (p.menu) end.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
+      head.append(end);
       art.append(head);
       if (p.id) art.dataset.id = p.id;
       if (p.vote) {

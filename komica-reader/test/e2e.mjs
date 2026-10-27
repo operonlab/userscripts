@@ -18,7 +18,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { chromium, devices } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
 const MATCHES = ['https://gaia.komica1.org/00b/', 'https://komica1.org/', 'https://2cat.org/', 'https://2cat.uk/', 'https://cat.2nyan.org/'];
@@ -1256,6 +1256,77 @@ try {
   await bp.unroute(BOARD);
   check('not a board after all: the page shows, without the frame\'s sidebar, and is not kept in 最近', !notBoard.side && !notBoard.cover && notBoard.recent === '[]' && notBoard.text.includes('checking your browser'), JSON.stringify(notBoard));
   await bctx.close();
+
+  // on a phone (as one: its user agent and touch): nothing of the site's own page shows above the toolbar, a menu button
+  // stays on the line of what it belongs to wherever a header breaks, and 2cat's own ↑ ⟳ ↓ are not under the floating form
+  const mctx = await browser.newContext({ ...devices['iPhone 15 Pro'], deviceScaleFactor: 1, locale: 'zh-TW', colorScheme: 'dark' });
+  await mctx.addInitScript(wrapped);
+  await mctx.route(/^https:\/\/(gaia\.komica1\.org|(www\.)?2cat\.org)\//, (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && /^mode=edit_links&/.test(q.postData() || '')) return r.continue();
+    return q.method() === 'GET' && !/mod_report/.test(q.url()) ? r.continue() : r.abort();
+  });
+  const mp = await mctx.newPage();
+  await mp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  if (await mp.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null)) {
+    const edge = await mp.evaluate(() => ({ toolbarTop: Math.round(document.querySelector('.kr-toolbar').getBoundingClientRect().top), scrollY,
+      html: getComputedStyle(document.documentElement).backgroundColor, body: getComputedStyle(document.body).backgroundColor }));
+    check('phone: the toolbar starts at the top edge, and the page pulled past the top shows the list\'s colour', edge.scrollY === 0 && edge.toolbarTop === 0 && edge.html === edge.body, JSON.stringify(edge));
+    const most = await mp.evaluate(() => [...document.querySelectorAll('#threads .thread')]
+      .map((t) => [t.dataset.no, Number(/\d+/.exec(t.querySelector('.kr-meta-count')?.textContent || '')?.[0] || 0)]).sort((a, b) => b[1] - a[1])[0]?.[0]);
+    await mp.locator(`#threads .thread[data-no="${most}"] .kr-meta-count`).click();
+    await mp.waitForSelector('.kr-pane .kr-post', { timeout: 15000 });
+    await mp.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => {});
+    // where a header breaks depends on its name, date and ID and the screen's width: a name grown a few px at a time
+    // moves the break across every point of one header, whatever posts the board has today
+    const lone = await mp.evaluate(() => {
+      const head = [...document.querySelectorAll('.kr-pane .kr-post-head')].find((h) => h.querySelector('.kr-id-menu') && h.querySelector('.post-menu-toggle'));
+      if (!head) return null;
+      const line = (a, b) => { const r = a.getBoundingClientRect(), s = b.getBoundingClientRect(); return r.top < s.bottom && s.top < r.bottom; };
+      const name = head.querySelector('.kr-post-name');
+      const found = { steps: 0, broke: 0, menu: [], idMenu: [] };
+      for (let w = 0; w <= 320; w += 6) {
+        name.style.cssText = `display: inline-block; width: ${w}px`;
+        found.steps++;
+        if (head.getBoundingClientRect().height > 30) found.broke++;
+        if (!line(head.querySelector('.post-menu-toggle'), head.querySelector('.kr-post-no'))) found.menu.push(w);
+        if (!line(head.querySelector('.kr-id-menu'), head.querySelector('.kr-post-id'))) found.idMenu.push(w);
+      }
+      name.style.cssText = '';
+      return found;
+    });
+    if (!lone) {
+      console.log('UNVERIFIABLE  phone: no post in the pane has both the site\'s ID ⋯ and ▾ to measure');
+      code = 2;
+    } else {
+      check('phone: wherever a header breaks, ▾ stays with its No. and ⋯ with its ID', lone.broke > 10 && !lone.menu.length && !lone.idMenu.length, JSON.stringify(lone));
+    }
+    await shot(mp, '14-phone-pane.png');
+  } else {
+    console.log('UNVERIFIABLE  phone: the board did not load');
+    code = 2;
+  }
+  const cp = await mctx.newPage();
+  await cp.goto('https://2cat.org/cellphone/', { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  const navi = await cp.waitForFunction(() => document.querySelectorAll('img.mobile-navi').length >= 3 && document.querySelector('.kr-composer'), null, { timeout: 20000 }).catch(() => null);
+  if (navi) {
+    await cp.waitForTimeout(500);
+    const clear = await cp.evaluate(() => {
+      const form = document.querySelector('.kr-composer').getBoundingClientRect();
+      return [...document.querySelectorAll('img.mobile-navi')].map((b) => {
+        const r = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        const under = r.left < form.right && form.left < r.right && r.top < form.bottom && form.top < r.bottom;
+        return { t: b.title, rect: [r.left, r.top, r.width, r.height].map(Math.round), inView: r.right <= innerWidth && r.bottom <= innerHeight, free: hit === b, under };
+      });
+    });
+    check('phone, 2cat: the site\'s ↑ ⟳ ↓ are in view, each tappable, none under the floating form', clear.length === 3 && clear.every((b) => b.inView && b.free && !b.under), JSON.stringify(clear));
+    await shot(cp, '15-phone-2cat.png');
+  } else {
+    console.log('UNVERIFIABLE  phone, 2cat: the site\'s ↑ ⟳ ↓ did not appear');
+    code = 2;
+  }
+  await mctx.close();
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);

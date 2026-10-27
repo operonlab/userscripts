@@ -3,6 +3,12 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.7 — 2026-10-28
+
+- **On a phone, a post's ▾ stays beside its number.** A dated post header is too long for a phone's width and breaks in two, and the ▾ (or the ⋯ beside an ID) often landed alone at the start of the next line, looking like it belonged to nothing. The number and its ▾ now move to the next line together, and so do an ID and its ⋯.
+- **No cream strip above the bar.** 綜合's page keeps a thin margin above everything in the site's cream; in dark mode it showed above the reader's bar, and on a phone pulled down past the top. It is the list's colour now.
+- **2cat's own ↑ ⟳ ↓ on a phone** sat under the floating 發新串 button, the ↓ hidden behind it. They are round grey buttons now, like 綜合's, stacked just above it.
+
 ## 0.6.6 — 2026-10-28
 
 - **The site's ads are back, in the reader's style.** The reader had hidden them all. Now each one is a card of its own marked 廣告, where the site puts it and no longer floated beside a row: on 綜合 above the list, the site's wide-screen or phone banner as the site picks it; on 2cat among the threads, and on 2cat's older boards (職業) the column the site keeps beside the list, now a card above it. A slot the ad network left empty is not shown.
