@@ -152,3 +152,19 @@
 - 選單本次有 229 個 `<a href>`（含 `#` 控制與頁尾連結）；181 個未明示 target、8 個明示 `cont`。另有 16 個 `_blank`，以及拼寫成 `_balnk`（22）、`blank`（1）與 `_blnak`（頁尾 1）的 target；後三者是具名 browsing context，不能當成標準 `_blank`。連結的實際 `target`、分類和標籤在 JSON 的 `portal.menu_links`。
 - [行動入口](https://komica1.org/m/) 是獨立選單頁，沒有 frameset，設定 `<base target="_blank">`，預設將板頁開在新 browsing context；本次頁面共有 220 個 `<a>`。桌面主畫面是入口內容頁而非板頁，本次共有 56 個 `<a>`。
 - 入口選單中的「外部連結」13 筆與「失效連結」1 筆仍逐一 GET 並保留狀態；「主題選擇」及 `#` 控制不作板頁 GET。
+
+## 入口沒列、但還活著的板（2026-10-27）
+
+portal 選單沒有這些板。2026-10-27 調查時逐一 GET 回 200、標題相符（調查 agent 的紀錄，未另行複驗）。側欄不收（owner 決定：遇到再一個個加），留在這裡備查。
+
+| 板 | 網址 | 備註 |
+|---|---|---|
+| Princess Connect! | [https://2cat.org/princess/](https://2cat.org/princess/) |  |
+| 高解析版 | [https://2cat.org/hiso2/](https://2cat.org/hiso2/) |  |
+| 網頁遊戲 (避難版) | [https://2cat.org/webgame3/](https://2cat.org/webgame3/) |  |
+| 東方祭典版 | [https://2cat.org/touhou2/](https://2cat.org/touhou2/) |  |
+| 二次裡A避難版 | [https://2cat.org/~chatura/](https://2cat.org/~chatura/) | 18禁 |
+| 三次裡避難版 | [https://2cat.org/~realura/](https://2cat.org/~realura/) | 18禁 |
+| 版務討論區 | [https://2cat.uk/admin/](https://2cat.uk/admin/) |  |
+| 元綜合避難所 | [https://gita.komica1.org/00b/index.htm](https://gita.komica1.org/00b/index.htm) |  |
+| 艦隊これくしょん (jormungandr) | [https://jormungandr.info/kancolle/](https://jormungandr.info/kancolle/) |  |
