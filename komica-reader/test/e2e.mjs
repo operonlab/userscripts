@@ -609,6 +609,15 @@ try {
     }
     check('pane: an untitled thread\'s title has no ▲▼ in it', titles.length > 0 && titles.every((t) => !/[▲▼]/.test(t)), JSON.stringify(titles));
     await vp.locator('.kr-pane-close').click();
+    // the form keeps the site's notices (folded behind one line) and its 發文說明與注意事項
+    await vp.locator('.kr-composer-toggle').click();
+    await vp.waitForTimeout(300);
+    const shown = (sel) => vp.evaluate((s) => (document.querySelector(s)?.getBoundingClientRect().height || 0) > 0, sel);
+    const form = { toggle: await shown('.kr-composer .kr-notices-toggle'), notices: await shown('.kr-composer #postinfo .post-notices'), rules: await shown('.kr-composer #postinfo .post-instructions') };
+    if (form.toggle) await vp.locator('.kr-notices-toggle').click();
+    const opened = await shown('.kr-composer #postinfo .post-notices');
+    check('form: the site\'s notices fold behind one line and open on it; its 發文說明與注意事項 shows', form.toggle && !form.notices && form.rules && opened, JSON.stringify({ ...form, opened }));
+    await vp.locator('.kr-composer-close').click();
     const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
     // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
     // the second reply, and the last reply on the 隱藏貼文清單

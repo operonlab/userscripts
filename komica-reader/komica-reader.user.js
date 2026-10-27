@@ -619,7 +619,18 @@ html.kr .kr-composer { position: fixed; z-index: 9001; right: 16px; bottom: 16px
   border: .5px solid var(--kr-sep); border-radius: 16px; box-shadow: var(--kr-shadow); }
 html.kr .kr-composer #postform { padding: 0 12px 12px; background: none !important; }
 html.kr .kr-composer[data-kr-state="collapsed"] #postform { position: absolute; left: 0; width: 440px; max-height: 0; padding: 0; overflow: hidden; }
-html.kr .kr-composer #postinfo .post-notices, html.kr .kr-composer #postinfo .post-instructions, html.kr .kr-composer .bar_reply { display: none; }
+/* the site's own lines in the form stay, small: 回應模式 with the view count, its notices (folded behind one line), and
+   its 發文說明與注意事項, a <details> of its own */
+html.kr .kr-composer .bar_reply { margin: 0 4px 4px; padding: 0; border: 0 !important; background: none !important; color: var(--kr-text3) !important; font: 11px var(--kr-font); text-align: left; }
+html.kr .kr-composer #postinfo { margin: 6px 4px 0; font: 12px/1.5 var(--kr-font); color: var(--kr-text2); }
+html.kr .kr-composer:not(.kr-notices-open) #postinfo .post-notices { display: none; }
+html.kr .kr-composer #postinfo .post-notices { margin: 4px 0 6px; padding-left: 18px; }
+html.kr .kr-composer #postinfo a { color: var(--kr-accent) !important; }
+html.kr .kr-composer #postinfo .post-instructions > summary { cursor: pointer; }
+html.kr .kr-composer #postinfo .post-instructions-hint { margin-left: 6px; color: var(--kr-text3); }
+html.kr .kr-composer .kr-notices-toggle { display: block; padding: 2px 0; border: 0; background: none; color: var(--kr-text2); font: inherit; cursor: pointer; }
+html.kr .kr-composer .kr-notices-toggle::after { content: ' ▸'; }
+html.kr .kr-composer.kr-notices-open .kr-notices-toggle::after { content: ' ▾'; }
 html.kr .kr-composer #postform_tbl { width: 100%; margin: 0 !important; border-collapse: separate; border-spacing: 0 4px; }
 html.kr .kr-composer #postform_tbl td { padding: 0 4px; border: 0 !important; background: none !important; color: var(--kr-text2) !important; font-size: 12px; vertical-align: middle; }
 html.kr .kr-composer #postform_tbl td.Form_bg { width: 4.5em; white-space: nowrap; }
@@ -1059,6 +1070,13 @@ html.kr-portal .kr-side { border-right: 0; }
     bar.append(toggle, close);
     form.insertBefore(bar, form.firstChild);
     form.append(el('div', { class: 'kr-composer-status', role: 'status' }));
+    // the site's notices stay in the form, folded behind one line until asked for
+    const notices = form.querySelector('#postinfo .post-notices');
+    if (notices) {
+      const more = el('button', { type: 'button', class: 'kr-notices-toggle', 'aria-expanded': 'false' }, `站方公告 · ${notices.querySelectorAll(':scope > li').length} 則`);
+      more.addEventListener('click', () => more.setAttribute('aria-expanded', String(form.classList.toggle('kr-notices-open'))));
+      notices.before(more);
+    }
 
     toggle.addEventListener('click', () => (form.dataset.krState === 'expanded' && composer.mode === 'new' && !resto ? collapse() : expand(true)));
     close.addEventListener('click', collapse);
