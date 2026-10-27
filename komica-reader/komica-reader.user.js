@@ -545,7 +545,7 @@ html.kr-md #threads .post { background: none !important; color: var(--kr-text) !
 html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
 html.kr-md #threads .threadpost .file-text, html.kr-md #threads .threadpost .post-head input[type="checkbox"],
 html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .post-action-wrap, html.kr-md #threads .threadpost .rlink,
-html.kr-md #threads .threadpost .category, html.kr-md #threads .threadpost .backquote,
+html.kr-md #threads .threadpost .backquote,
 html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br, html.kr-md #threads .threadpost .pugid-edit-slot { display: none !important; }
 html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 2px 0; }
 html.kr-md #threads .threadpost .file-thumb img { width: 72px !important; height: 72px !important; object-fit: cover; border-radius: 9px; }
@@ -580,6 +580,14 @@ html.kr-md #scroller { position: static !important; width: auto !important; heig
 html.kr-md #navi { display: none !important; }
 html.kr-md .kr-meta { clear: both; display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
 html.kr-md .kr-meta button { border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
+/* the site's 類別 on a row: its links as chips under the text; 「類別:」 and the commas are typography, sized away */
+html.kr-md #threads .threadpost .category { float: none !important; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 56px 0 0; font-size: 0; }
+html.kr-md #threads .threadpost .category a, html.kr .kr-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2) !important;
+  font: 11px/1.5 var(--kr-font); text-decoration: none; }
+html.kr-md #threads .threadpost .category a:hover, html.kr .kr-tag:hover { background: var(--kr-fill2); color: var(--kr-text) !important; }
+html.kr-md #threads .threadpost .category a:is(.tagproposal-open, [target="_blank"]), html.kr .kr-tag-propose { background: none; padding: 2px 4px; color: var(--kr-text3) !important;
+  font: 11px var(--kr-font); text-decoration: none; }
+html.kr .kr-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
 /* the site's ▲▼ on a row: out of the clamped text, on the row's meta line (the site's own buttons and handler) */
 html.kr-md #threads .threadpost .quote .postvote-slot { position: absolute; right: 14px; bottom: 10px; margin: 0; }
 html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
@@ -1402,6 +1410,7 @@ html.kr-portal .kr-side { border-right: 0; }
       const fileLink = post.querySelector('.file-text a[href]');
       const src = holder?.getAttribute('data-image-original') || fileLink?.getAttribute('href') || '';
       const info = (post.querySelector('.file-text')?.textContent || '').replace(/^\s*檔名[:：]\s*/, '').trim();
+      const propose = post.querySelector('.category a.tagproposal-open')?.getAttribute('data-no') || '';
       return {
         no: Number(post.getAttribute('data-no')),
         op: post.classList.contains('threadpost'),
@@ -1422,8 +1431,26 @@ html.kr-portal .kr-side { border-right: 0; }
           : null,
         quote: post.querySelector('.quote'),
         vote: readVote(post),
+        tags: readTags(post),
+        propose: /^\d+$/.test(propose) ? propose : null,
       };
     });
+  }
+
+  // the site's 類別 on a post: its own links to its category pages, kept as such
+  function readTags(post) {
+    const tags = [];
+    for (const a of post.querySelectorAll('.category a[href]')) {
+      let url;
+      try {
+        url = new URL(a.getAttribute('href'), location.href);
+      } catch {
+        continue;
+      }
+      const c = url.searchParams.get('c');
+      if (url.origin === location.origin && url.searchParams.get('mode') === 'category' && c) tags.push({ name: c, href: url.href });
+    }
+    return tags;
   }
 
   // gaia's ▲▼: the counts and the fold state as the page has them. The pane draws the slot again with the site's own
@@ -1673,6 +1700,15 @@ html.kr-portal .kr-side { border-right: 0; }
         }
       }
       art.append(text);
+      if (p.tags?.length) {
+        const tags = el('div', { class: 'kr-tags' });
+        for (const t of p.tags) tags.append(el('a', { class: 'kr-tag', href: t.href }, t.name));
+        if (p.propose) {
+          const href = `pixmicat.php?mode=module&load=mod_tagproposal&view=form&no=${p.propose}`;
+          tags.append(el('a', { class: 'kr-tag-propose tagproposal-open', 'data-no': p.propose, href, target: '_blank', rel: 'noopener' }, '建議追加／移除標籤'));
+        }
+        art.append(tags);
+      }
       if (p.vote) {
         if (p.vote.no) {
           const bar = el('div', { class: 'kr-vote' });
@@ -1919,6 +1955,16 @@ html.kr-portal .kr-side { border-right: 0; }
     document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-selected');
   }
 
+  // a post's words, line by line, without what the site puts inside its text box (its ▲▼, the fold notice) and
+  // without what a 防雷 keeps closed
+  function quoteText(quote) {
+    if (!quote) return '';
+    const q = quote.cloneNode(true);
+    for (const n of q.querySelectorAll('.postvote-slot, .postvote-notice, .postvote-state, .text-spoiler-content')) n.remove();
+    for (const n of q.querySelectorAll('br, div, p, li')) n.after('\n');
+    return q.textContent;
+  }
+
   function setPaneTitle(res, posts) {
     const p = state.pane;
     const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
@@ -1926,7 +1972,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const t = (op?.title || card?.querySelector('.threadpost .title')?.textContent || '').trim();
     // an untitled thread is named by its first line, as a mail without subject would be
     const quote = op?.quote || card?.querySelector('.threadpost .quote');
-    const first = (quote?.innerText || quote?.textContent || '').split('\n').map((l) => l.trim()).find((l) => l && !/^>>\d+$/.test(l)) || '';
+    const first = quoteText(quote).split('\n').map((l) => l.trim()).find((l) => l && !/^>>\d+$/.test(l)) || '';
     p.title.textContent = t && !UNTITLED.test(t) ? t : first.slice(0, 60) || `No.${res}`;
     const count = posts ? `${posts.length - 1} 則回應` : card?.querySelector('.kr-meta-count')?.textContent.replace(/^💬\s*/, '') || '';
     p.sub.textContent = [`No.${res}`, count].filter(Boolean).join(' · ');
@@ -2099,7 +2145,7 @@ html.kr-portal .kr-side { border-right: 0; }
           }
           const words = el('div', { class: 'kr-row-text' });
           if (op.title && !UNTITLED.test(op.title)) words.append(el('div', { class: 'kr-row-title' }, op.title));
-          words.append(el('div', { class: 'kr-row-snippet' }, (op.quote?.innerText || op.quote?.textContent || '').trim()));
+          words.append(el('div', { class: 'kr-row-snippet' }, quoteText(op.quote).trim()));
           row.append(words);
           card.prepend(row);
         }
@@ -2132,7 +2178,7 @@ html.kr-portal .kr-side { border-right: 0; }
     for (const reply of card.querySelectorAll('.post.reply')) {
       const p = readPixmicatPost(reply);
       const item = el('div', { class: 'kr-peek-item' });
-      item.append(el('div', { class: 'kr-peek-head' }, [p.name, p.time].filter(Boolean).join(' · ')), el('div', { class: 'kr-peek-text' }, (p.quote?.innerText || p.quote?.textContent || '').trim()));
+      item.append(el('div', { class: 'kr-peek-head' }, [p.name, p.time].filter(Boolean).join(' · ')), el('div', { class: 'kr-peek-text' }, quoteText(p.quote).trim()));
       list.append(item);
     }
     card.querySelector('.kr-meta').before(list);

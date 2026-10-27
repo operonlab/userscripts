@@ -587,6 +587,28 @@ try {
       return { found: !!r, inside: !!r && r.height > 0 && r.right <= tr.right && r.top >= tr.top && r.bottom <= tr.bottom };
     });
     check('rows: the site\'s ▲▼ show on the row', row.found && row.inside, JSON.stringify(row));
+    const cats = await vp.evaluate(() => {
+      const cat = [...document.querySelectorAll('#threads .threadpost .category')].find((c) => c.querySelector('a[href*="mode=category"]'));
+      const chips = [...(cat?.querySelectorAll('a[href*="mode=category"]') || [])];
+      const tr = cat?.closest('.thread').getBoundingClientRect();
+      return { res: cat?.closest('.thread').dataset.no, names: chips.map((a) => a.textContent.trim()), shown: chips.length > 0 && chips.every((a) => { const r = a.getBoundingClientRect(); return r.height > 0 && r.bottom <= tr.bottom; }) };
+    });
+    check('rows: the site\'s 類別 show on the row', cats.shown, JSON.stringify(cats));
+    if (cats.res) {
+      await vp.locator(`#threads .thread[data-no="${cats.res}"] .kr-meta-count`).click();
+      await vp.waitForSelector('.kr-pane .kr-post-op', { timeout: 10000 }).catch(() => null);
+      const got = await vp.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post-op .kr-tags .kr-tag')].map((a) => ({ name: a.textContent.trim(), mode: new URL(a.href).searchParams.get('mode'), same: new URL(a.href).origin === location.origin })));
+      check('pane: the OP carries the same 類別, linking to the site\'s category pages', got.length === cats.names.length && got.every((t, i) => t.name === cats.names[i] && t.mode === 'category' && t.same), JSON.stringify(got));
+    }
+    // an untitled thread is named by its first words; the ▲▼ the site keeps inside the text box are not words
+    const titles = [];
+    for (const res of await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].filter((t) => /^(無題|無標題)?$/.test(t.querySelector('.threadpost .title')?.textContent.trim() || '')).slice(0, 3).map((t) => t.dataset.no))) {
+      await vp.locator(`#threads .thread[data-no="${res}"] .kr-meta-count`).click();
+      await vp.waitForTimeout(400);
+      titles.push(await vp.evaluate(() => document.querySelector('.kr-pane-title').textContent));
+    }
+    check('pane: an untitled thread\'s title has no ▲▼ in it', titles.length > 0 && titles.every((t) => !/[▲▼]/.test(t)), JSON.stringify(titles));
+    await vp.locator('.kr-pane-close').click();
     const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
     // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
     // the second reply, and the last reply on the 隱藏貼文清單
