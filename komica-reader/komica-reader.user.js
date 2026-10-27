@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.2
+// @version      0.6.3
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -523,6 +523,9 @@ html.kr-md #del, html.kr-md #threads .thread > hr { display: none !important; }
 html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; margin: 0 -18px 12px; padding: 10px 18px;
   background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
   border-bottom: .5px solid var(--kr-sep); font-family: var(--kr-font); color: var(--kr-text); }
+/* this board inside another site's frame (2cat.uk's): the browser keeps the site's cookies from it, so votes do nothing */
+html.kr .kr-framed { display: block; margin: 0 0 10px; padding: 6px 12px; border-radius: 999px; background: var(--kr-warn-bg); color: var(--kr-warn-text) !important;
+  font: 600 12px var(--kr-font); text-decoration: none; }
 html.kr .kr-toolbar-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
 html.kr .kr-toolbar-title { font: 700 17px/1.2 var(--kr-font); overflow: hidden; text-overflow: ellipsis; }
 html.kr .kr-toolbar-sub, html.kr .kr-toolbar #online-counter { font: 12px var(--kr-font) !important; color: var(--kr-text2); margin: 0 !important; }
@@ -850,6 +853,23 @@ html.kr-portal .kr-side { border-right: 0; }
     return n;
   };
 
+  // A page framed by another site (2cat.uk frames its boards, and anything opened from them) gets none of the site's
+  // own cookies there: its vote identity and its login are blocked as cross-site. A frame cannot read its parent's
+  // address; Chrome and Safari list it in ancestorOrigins. Unknown parent (Firefox): treated as not framed, as before.
+  // ponytail: the last two labels as the site, right for the hosts this runs on; a public-suffix list if one is
+  // ever under a two-label suffix (idv.tw)
+  const siteOf = (host) => host.split('.').slice(-2).join('.');
+  const topHost = (() => {
+    if (window.top === window) return location.hostname;
+    try {
+      const anc = location.ancestorOrigins;
+      return anc?.length ? new URL(anc[anc.length - 1]).hostname : window.top.location.hostname;
+    } catch {
+      return null;
+    }
+  })();
+  const framedElsewhere = (url = location.href) => window.top !== window && !!topHost && siteOf(new URL(url, location.href).hostname) !== siteOf(topHost);
+
   function setupSidebar(boards, portal = false) {
     const current = portal ? null : matchBoard(location.href, boards);
     let stars = store.get('kr.stars', []);
@@ -929,7 +949,8 @@ html.kr-portal .kr-side { border-right: 0; }
     const byUrl = (url) => boards.find((board) => normalizeBoardUrl(board.u) === normalizeBoardUrl(url));
     const row = (board) => {
       const node = el('div', { class: `kr-side-row${board.s === 'down' ? ' kr-side-down' : ''}` });
-      const link = el('a', { href: board.u, target: board.c === '外部連結' ? '_blank' : portal ? 'cont' : '_self' }, board.l);
+      // a board on another site than the page this one is framed in opens as the page itself, its cookies working
+      const link = el('a', { href: board.u, target: board.c === '外部連結' ? '_blank' : portal ? 'cont' : framedElsewhere(board.u) ? '_top' : '_self' }, board.l);
       if (board.c === '外部連結') link.rel = 'noopener';
       if (board.s === 'down') {
         link.title = `上次檢查 ${BOARDS_AT} 連不上`;
@@ -2443,6 +2464,14 @@ html.kr-portal .kr-side { border-right: 0; }
       window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
     } else if (document.getElementById('threads')) {
       initBoard();
+    }
+    // 綜合 (the board with votes) inside another site's frame: its votes come to nothing there, so say so and offer the
+    // page itself. The portal's own frame is the same site, and its board frame stays put.
+    if (location.hostname === 'gaia.komica1.org' && window.name !== 'cont' && framedElsewhere()) {
+      const notice = el('a', { class: 'kr-framed', href: location.href, target: '_top' }, `這一版開在 ${topHost} 的框架裡，瀏覽器擋掉站方的 cookie，投票不會生效 · 整頁開啟`);
+      const bar = document.querySelector('.kr-toolbar');
+      if (bar) bar.after(notice);
+      else document.body.prepend(notice);
     }
     window.addEventListener('load', () => {
       tagSiteScroll();

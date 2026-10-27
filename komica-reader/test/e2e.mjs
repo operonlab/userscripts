@@ -1007,6 +1007,69 @@ try {
   }
   await pctx.close();
 
+  // 綜合 inside another site's frame (2cat.uk frames its boards, and what is opened from them): the browser keeps the
+  // site's cookies from it, so its votes do nothing. The reader says so and offers the page itself, and its board links
+  // there open as the page, not in the frame. The top page here is a stand-in served by the test.
+  const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW' });
+  await fctx.addInitScript(wrapped);
+  await fctx.route(/post_vote\.php/, (r) => (r.request().method() === 'POST' ? r.abort() : r.continue()));
+  // stand-in top pages: one on another site, one on 綜合's own site; ?src= is the page they frame
+  await fctx.route(/^https:\/\/(kr-frame-test\.example|kr-test\.komica1\.org)\/\?src=/, (r) => r.fulfill({ contentType: 'text/html',
+    body: `<!doctype html><iframe src="${new URL(r.request().url()).searchParams.get('src')}" style="border:0;width:100%;height:860px"></iframe>` }));
+  const framedIn = async (page, top, src, ready = '.kr-toolbar') => {
+    await page.goto(`${top}?src=${encodeURIComponent(src)}`, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+    for (let i = 0; i < 40; i++) {
+      const f = page.frames().find((x) => x.url().startsWith('https://gaia.komica1.org/00b/'));
+      if (f && await f.evaluate((sel) => !!document.querySelector(sel), ready).catch(() => false)) return f;
+      await page.waitForTimeout(500);
+    }
+    return null;
+  };
+  const fp = await fctx.newPage();
+  const ff = await framedIn(fp, 'https://kr-frame-test.example/', BOARD);
+  if (ff) {
+    const framed = await ff.evaluate(() => {
+      const n = document.querySelector('.kr-framed');
+      const t = [...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank').map((a) => a.target);
+      return { notice: n?.textContent || null, href: n?.getAttribute('href'), target: n?.getAttribute('target'), shown: !!n && n.getBoundingClientRect().height > 0, links: t.length, top: t.filter((x) => x === '_top').length };
+    });
+    const cookies = (await fctx.cookies('https://gaia.komica1.org/00b/')).map((c) => c.name);
+    check('framed by another site: the browser keeps the site\'s vote cookie from it (what the notice is for)', !cookies.includes('komica_vote_token'), JSON.stringify(cookies));
+    check('framed by another site: a notice says votes do nothing here, and opens the board as the page', framed.shown && /投票不會生效/.test(framed.notice) && framed.target === '_top' && !!framed.href?.startsWith('https://gaia.komica1.org/00b/'), JSON.stringify(framed));
+    check('framed by another site: the sidebar\'s boards open as the page, not in the frame', framed.links > 0 && framed.top === framed.links, JSON.stringify({ links: framed.links, top: framed.top }));
+    if (framed.shown) await ff.locator('.kr-framed').click();
+    await fp.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 }).catch(() => null);
+    await fp.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null);
+    await fp.waitForTimeout(3000);
+    const after = {
+      url: fp.url(),
+      cookies: (await fctx.cookies('https://gaia.komica1.org/00b/')).map((c) => c.name),
+      notice: await fp.evaluate(() => !!document.querySelector('.kr-framed')).catch(() => null),
+      targets: await fp.evaluate(() => [...new Set([...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank').map((a) => a.target))]).catch(() => null),
+    };
+    check('opened as the page: no notice, the site\'s vote cookie is kept, and board links open in place', after.url.startsWith('https://gaia.komica1.org/00b/') && after.cookies.includes('komica_vote_token') && after.notice === false && JSON.stringify(after.targets) === '["_self"]', JSON.stringify(after));
+
+    // a thread page framed by another site says so too
+    const res = await fp.evaluate(() => document.querySelector('#threads .thread')?.dataset.no).catch(() => null);
+    const tf = res && await framedIn(fp, 'https://kr-frame-test.example/', `https://gaia.komica1.org/00b/pixmicat.php?res=${res}`, 'html.kr-thread');
+    const tnote = tf && await tf.evaluate(() => { const n = document.querySelector('.kr-framed'); return n ? { shown: n.getBoundingClientRect().height > 0, target: n.target } : null; });
+    check('framed by another site: a thread page says so as well', !!tnote?.shown && tnote.target === '_top', JSON.stringify({ res, tnote }));
+
+    // framed by 綜合's own site (as the komica1.org portal does): cookies are kept there, so no notice; its own boards
+    // stay in the frame and only other sites' open as the page
+    const sf = await framedIn(fp, 'https://kr-test.komica1.org/', BOARD);
+    const same = sf && await sf.evaluate(() => {
+      const links = [...document.querySelectorAll('.kr-side-row a')].filter((a) => a.target !== '_blank');
+      const own = links.filter((a) => a.hostname.endsWith('komica1.org'));
+      const other = links.filter((a) => !a.hostname.endsWith('komica1.org'));
+      return { notice: !!document.querySelector('.kr-framed'), own: own.length, ownSelf: own.filter((a) => a.target === '_self').length, other: other.length, otherTop: other.filter((a) => a.target === '_top').length };
+    });
+    check('framed by 綜合\'s own site: no notice; its boards stay in the frame, other sites\' open as the page', !!same && !same.notice && same.own > 0 && same.ownSelf === same.own && same.other > 0 && same.otherTop === same.other, JSON.stringify(same));
+  } else {
+    check('framed by another site: the board loaded in the frame with the reader', false);
+  }
+  await fctx.close();
+
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);
 } catch (e) {
