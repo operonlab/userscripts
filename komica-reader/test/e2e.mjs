@@ -725,8 +725,9 @@ try {
       const mine = await vp.evaluate(() => {
         const posts = [...document.querySelectorAll('.kr-pane .kr-post')];
         const no = posts.filter((p) => !p.classList.contains('kr-post-op') && p.getBoundingClientRect().height > 0)[0]?.dataset.no;
-        // the site shuts its menu on any scroll: bring the post into view first
-        document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`)?.scrollIntoView({ block: 'center' });
+        // the site shuts its menu on any scroll: bring the ▾ itself into view first (centring a post taller than the
+        // pane, a big picture, would put its ▾ above the top, and the click's own scroll would shut the menu)
+        document.querySelector(`.kr-pane .kr-post[data-no="${no}"] .post-menu-toggle`)?.scrollIntoView({ block: 'center' });
         return { posts: posts.length, withMenu: posts.filter((p) => p.querySelector('.kr-post-head .post-menu-toggle[data-no][data-report-url]')).length, no };
       });
       await vp.waitForTimeout(1200);
@@ -751,7 +752,7 @@ try {
         return { res, no: a?.dataset.no, name: a?.querySelector('.kr-post-name')?.textContent, words: (a?.querySelector('.kr-post-text')?.textContent || '').replace(/\s+/g, '').slice(0, 10) };
       });
       const openMenu = async (sel) => {
-        await vp.evaluate((s) => document.querySelector(s)?.closest('.kr-post')?.scrollIntoView({ block: 'center' }), sel);
+        await vp.evaluate((s) => document.querySelector(s)?.scrollIntoView({ block: 'center' }), sel);
         await vp.waitForTimeout(1200);
         await vp.locator(sel).click();
         await vp.waitForTimeout(200);
@@ -774,7 +775,8 @@ try {
       await vp.keyboard.press('Escape');
       const afterEsc = await vp.evaluate(() => ({ menu: document.querySelector('.post-action-menu')?.hidden === false, pane: document.documentElement.classList.contains('kr-pane-open') }));
       check('pane ▾: the OP\'s menu offers 隱藏此討論串; Esc shuts the menu, not the thread', /隱藏此討論串/.test(opLabel) && !afterEsc.menu && afterEsc.pane, JSON.stringify({ opLabel, ...afterEsc }));
-      await vp.locator('.kr-pane-close').click();
+      // (a failed check above can leave the pane shut: then there is no × to wait for)
+      if (await vp.locator('.kr-pane-close').isVisible()) await vp.locator('.kr-pane-close').click();
     }
     // ID tools: 同串 counts only once the thread is whole (the card holds only the latest replies), coloured by the
     // count; a click marks one ID's posts; the site's ID menu opens from ⋯ and its 隱藏此 ID applies at once.
@@ -816,7 +818,7 @@ try {
       const victimId = await vp.evaluate(() => {
         const op = document.querySelector('.kr-pane .kr-post-op')?.dataset.id;
         const a = [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op)')].find((x) => x.dataset.id && x.dataset.id !== op && x.getBoundingClientRect().height > 0);
-        a?.scrollIntoView({ block: 'center' });
+        (a?.querySelector('.kr-id-menu') || a)?.scrollIntoView({ block: 'center' });
         return a?.dataset.id;
       });
       if (victimId) {
@@ -832,7 +834,7 @@ try {
         }, victimId);
         check('pane: the site\'s ID menu opens from ⋯, and its 隱藏此 ID hides that ID\'s replies at once', idMenu.open && idMenu.label === `ID:${victimId}` && idHid.stored && idHid.hidden, JSON.stringify({ victimId, ...idMenu, ...idHid }));
       }
-      await vp.locator('.kr-pane-close').click();
+      if (await vp.locator('.kr-pane-close').isVisible()) await vp.locator('.kr-pane-close').click();
     }
     const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
     // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
@@ -1320,7 +1322,8 @@ try {
         return { t: b.title, rect: [r.left, r.top, r.width, r.height].map(Math.round), inView: r.right <= innerWidth && r.bottom <= innerHeight, free: hit === b, under };
       });
     });
-    check('phone, 2cat: the site\'s ↑ ⟳ ↓ are in view, each tappable, none under the floating form', clear.length === 3 && clear.every((b) => b.inView && b.free && !b.under), JSON.stringify(clear));
+    // the reader places each by its title: the three the site names Top, Reload, Bottom
+    check('phone, 2cat: the site\'s ↑ ⟳ ↓ are in view, each tappable, none under the floating form', clear.map((b) => b.t).sort().join() === 'Bottom,Reload,Top' && clear.every((b) => b.inView && b.free && !b.under), JSON.stringify(clear));
     await shot(cp, '15-phone-2cat.png');
   } else {
     console.log('UNVERIFIABLE  phone, 2cat: the site\'s ↑ ⟳ ↓ did not appear');

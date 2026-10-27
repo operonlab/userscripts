@@ -656,7 +656,7 @@ html.kr .kr-site-scroll a { display: block; width: 34px; height: 34px; border-ra
   box-shadow: var(--kr-shadow); color: var(--kr-text2) !important; font: 13px/34px var(--kr-font); text-align: center; text-decoration: none; }
 /* 2cat's own ↑ ⟳ ↓ on a phone (images it places with inline styles): the same round grey buttons, stacked above the
    floating form instead of under it */
-html.kr-md img.mobile-navi { left: auto !important; right: 16px !important; width: 34px !important; height: 34px; box-sizing: border-box; padding: 3px;
+html.kr-md img.mobile-navi { left: auto !important; right: 16px !important; width: 34px !important; height: 34px !important; box-sizing: border-box; padding: 3px;
   border-radius: 999px; background: var(--kr-glass); box-shadow: var(--kr-shadow); filter: grayscale(1); opacity: 1 !important; }
 html.kr-md img.mobile-navi[title="Bottom"] { bottom: 76px !important; }
 html.kr-md img.mobile-navi[title="Reload"] { bottom: 116px !important; }
