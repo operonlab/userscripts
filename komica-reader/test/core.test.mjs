@@ -33,6 +33,12 @@ test('board matching distinguishes category views from the 00b index and threads
   assert.equal(matchBoard('https://other.org/00b/1.htm', boards), null);
 });
 
+test('a board that redirects is found from the address it lands on', () => {
+  const moved = [...boards, { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok', f: 'https://2cat.org/career/' }];
+  for (const href of ['https://2cat.org/career/', 'https://2cat.org/career/index.php', 'https://2cat.org/~career/']) assert.equal(matchBoard(href, moved), moved[3]);
+  assert.equal(matchBoard('https://2cat.org/careers/', moved), null);
+});
+
 test('board filtering matches label or category without case or surrounding spaces', () => {
   assert.deepEqual(plain(filterBoards(boards, '  動畫  ')), plain([boards[1]]));
   assert.deepEqual(plain(filterBoards(boards, '遊戲')), plain([boards[2]]));
@@ -166,4 +172,29 @@ test('the reply is found again by its first line that is not a quote', () => {
   assert.equal(postedProbe('>>1\n>>2\n\n  第二段  \n第三段'), '第二段');
   assert.equal(postedProbe('>>1\n>>2\n'), '');
   assert.equal(postedProbe('x'.repeat(50)).length, 30);
+});
+
+test('2cat and classic boards: their thread links, anchors and wordings are understood too', () => {
+  const touhoux = 'https://2cat.org/touhoux/';
+  assert.deepEqual(plain(threadLink('/touhoux/?res=3939&no=3939', touhoux)), { res: 3939, post: null });
+  assert.deepEqual(plain(threadLink('?res=79556#s79556', 'https://2cat.org/career/')), { res: 79556, post: 79556 });
+  assert.deepEqual(plain(threadLink('pixmicat.php?res=4921#q4922', 'https://2cat.org/hiso/')), { res: 4921, post: 4922 });
+  assert.equal(threadLink('/touhou/?res=3', touhoux), null); // another board on the same host
+  assert.equal(threadLink('pixmicat.php?mode=module&res=5', 'https://2cat.org/hiso/').res, 5); // a res link is a res link
+  assert.equal(threadLink('report.php?res=5', 'https://2cat.org/hiso/'), null);
+  assert.equal(omittedCount(' 有1541篇回應被省略；展開所有回應或圖片。'), 1541);
+  assert.equal(omittedCount('有回應 1 篇被省略。要閱讀所有回應請按下回應連結。'), 1);
+});
+
+test('classic time stamps: two-digit year, no seconds', () => {
+  const today = new Date(2026, 9, 27, 12);
+  assert.equal(shortTime('26/10/27(二)08:04 ID:7KtlMyq2]', today), '08:04');
+  assert.equal(shortTime('26/08/23(日)8:04', today), '08/23 08:04');
+  assert.equal(shortTime('26/13/01(一)08:04', today), null);
+});
+
+test('2cat image lines give their size too', () => {
+  assert.deepEqual(plain(fileDims('JPG - 170 KB - 960x1280')), { w: 960, h: 1280 });
+  assert.deepEqual(plain(fileDims('1787443496798.jpg-(806 KB, 4032x3024)')), { w: 4032, h: 3024 });
+  assert.equal(fileDims('1793029484099.jpg'), null);
 });

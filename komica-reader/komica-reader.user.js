@@ -2,9 +2,9 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.4.0
-// @description  A three-column reader for Komica's 綜合 board and portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
-// @description:zh-TW  K島綜合版與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
+// @version      0.5.0
+// @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
+// @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
 // @license      MIT
 // @homepageURL  https://github.com/operonlab/userscripts/tree/main/komica-reader
@@ -13,6 +13,9 @@
 // @downloadURL  https://raw.githubusercontent.com/operonlab/userscripts/main/komica-reader/komica-reader.user.js
 // @match        https://gaia.komica1.org/00b/*
 // @match        https://komica1.org/*
+// @match        https://2cat.org/*
+// @match        https://2cat.uk/*
+// @match        https://cat.2nyan.org/*
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -65,14 +68,14 @@
     { c: '連線板', l: 'UP', u: 'http://rthost.win/komica-up/upload.php', s: 'ok' },
     { c: '連線二板', l: '數學', u: 'https://grea.komica1.org/75/index.htm', s: 'down' },
     { c: '連線二板', l: '校園', u: 'https://grea.komica1.org/school/', s: 'down' },
-    { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok' },
+    { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok', f: 'https://2cat.org/career/' },
     { c: '連線二板', l: '財經', u: 'https://2cat.org/~finance/', s: 'ok' },
     { c: '連線二板', l: '生活消費', u: 'http://gzone-anime.info/UnitedSites/shopping/', s: 'ok' },
     { c: '連線二板', l: '法律', u: 'https://2cat.org/~law/', s: 'ok' },
     { c: '連線二板', l: '海外', u: 'https://eclair.nagatoyuki.org/outremer/', s: 'ok' },
     { c: '連線二板', l: '閒談@香港', u: 'https://kagaminerin.org/hongkong/', s: 'down' },
     { c: '連線二板', l: '藝術', u: 'http://gzone-anime.info/UnitedSites/art/', s: 'ok' },
-    { c: '連線二板', l: '繪師', u: 'https://2cat.org/~artist/', s: 'ok' },
+    { c: '連線二板', l: '繪師', u: 'https://2cat.org/~artist/', s: 'ok', f: 'https://2cat.org/artist/' },
     { c: '連線二板', l: '交易合購', u: 'https://komica.yucie.net/trade/', s: 'down' },
     { c: '連線二板', l: '鋼普拉', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%8B%BC%E6%99%AE%E6%8B%89', s: 'ok' },
     { c: '連線二板', l: '生存遊戲', u: 'https://2cat.komica1.org/~gtr2003/pixmicat1/', s: 'down' },
@@ -80,7 +83,7 @@
     { c: '連線二板', l: '故事接龍', u: 'https://storysol.boguspix.com/', s: 'ok' },
     { c: '連線二板', l: '歐美動畫', u: 'https://grea.komica1.org/76/', s: 'down' },
     { c: '連線二板', l: '大自然', u: 'https://2cat.komica1.org/~rt/pd/', s: 'down' },
-    { c: '連線二板', l: '天文', u: 'https://2cat.org/~astronomy/', s: 'ok' },
+    { c: '連線二板', l: '天文', u: 'https://2cat.org/~astronomy/', s: 'ok', f: 'https://2cat.org/astronomy/' },
     { c: '連線二板', l: '命理', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%91%BD%E7%90%86', s: 'ok' },
     { c: '連線二板', l: '戀愛', u: 'https://moecorner.com/iboards/Relationship/', s: 'down' },
     { c: '連線二板', l: '超常現象', u: 'https://2cat.org/~supernature/', s: 'ok' },
@@ -88,7 +91,7 @@
     { c: '連線二板', l: '流言終結', u: 'https://eclair.nagatoyuki.org/myth/', s: 'ok' },
     { c: '連線二板', l: '旅遊', u: 'https://travel.voidfactory.com/', s: 'ok' },
     { c: '連線二板', l: '耳機', u: 'https://tomo.komica1.org/77/index.htm', s: 'down' },
-    { c: '連線二板', l: '服飾', u: 'https://2cat.org/~pixmicat/', s: 'ok' },
+    { c: '連線二板', l: '服飾', u: 'https://2cat.org/~pixmicat/', s: 'ok', f: 'https://2cat.org/dressing/' },
     { c: '連線二板', l: '美容', u: 'https://kagaminerin.org/cosmetic/', s: 'down' },
     { c: '連線二板', l: '圖書', u: 'http://gzone-anime.info/UnitedSites/books/', s: 'ok' },
     { c: '連線二板', l: '煩惱相談', u: 'https://eclair.nagatoyuki.org/conseil/', s: 'ok' },
@@ -110,17 +113,17 @@
     { c: '遊戲', l: '戰略遊戲', u: 'https://warehouse-no-99.neocities.org/rcg-slg/', s: 'ok' },
     { c: '遊戲', l: '養成遊戲', u: 'https://komica.yucie.net/slg/', s: 'down' },
     { c: '遊戲', l: '戀愛遊戲', u: 'https://komica.yucie.net/renai/', s: 'down' },
-    { c: '遊戲', l: '女性向遊戲', u: 'https://2cat.org/~boylove/', s: 'ok' },
-    { c: '遊戲', l: '網頁遊戲', u: 'https://2cat.org/~webgame/', s: 'ok' },
+    { c: '遊戲', l: '女性向遊戲', u: 'https://2cat.org/~boylove/', s: 'ok', f: 'https://2cat.org/boylove/' },
+    { c: '遊戲', l: '網頁遊戲', u: 'https://2cat.org/~webgame/', s: 'ok', f: 'https://2cat.org/webgame2/' },
     { c: '遊戲', l: '獨立遊戲', u: 'https://komica.dbfoxtw.me/indiegame/', s: 'ok' },
-    { c: '遊戲', l: '手機遊戲', u: 'https://2cat.org/~handheld/', s: 'ok' },
-    { c: '遊戲', l: 'VR/體感遊戲', u: 'https://2cat.org/~motion/', s: 'ok' },
-    { c: '遊戲', l: '桌上遊戲', u: 'https://2cat.org/~boardgame/', s: 'ok' },
+    { c: '遊戲', l: '手機遊戲', u: 'https://2cat.org/~handheld/', s: 'ok', f: 'https://2cat.org/cellphone/' },
+    { c: '遊戲', l: 'VR/體感遊戲', u: 'https://2cat.org/~motion/', s: 'ok', f: 'https://2cat.org/motion/' },
+    { c: '遊戲', l: '桌上遊戲', u: 'https://2cat.org/~boardgame/', s: 'ok', f: 'https://2cat.org/boardgame/' },
     { c: '遊戲', l: '麻將', u: 'https://moecorner.com/iboards/Mahjong/', s: 'down' },
     { c: '遊戲', l: '遊戲設計', u: 'https://komica.dbfoxtw.me/gameprogramming/', s: 'ok' },
     { c: '遊戲', l: '網路遊戲', u: 'https://grea.komica1.org/52/index.htm', s: 'down' },
     { c: '遊戲作品', l: 'AGA', u: 'https://selene.zawarudo.org/alicegearaegis/', s: 'ok' },
-    { c: '遊戲作品', l: 'Azur Lane', u: 'https://2cat.org/~azurlane/', s: 'ok' },
+    { c: '遊戲作品', l: 'Azur Lane', u: 'https://2cat.org/~azurlane/', s: 'ok', f: 'https://2cat.org/azurlane/' },
     { c: '遊戲作品', l: 'DOTA2', u: 'https://dota2.akraft.net/', s: 'ok' },
     { c: '遊戲作品', l: 'FEZ', u: 'https://komica.yucie.net/fez/', s: 'down' },
     { c: '遊戲作品', l: 'GTA', u: 'https://fenrisulfr.org/gta/', s: 'ok' },
@@ -128,18 +131,18 @@
     { c: '遊戲作品', l: 'T7S', u: 'https://www.karlsland.net/t7s/', s: 'ok' },
     { c: '遊戲作品', l: 'WOW', u: 'http://www.wowhk.org/', s: 'down' },
     { c: '遊戲作品', l: '少女前線', u: 'https://selene.zawarudo.org/gf/', s: 'ok' },
-    { c: '遊戲作品', l: '碧藍幻想', u: 'https://2cat.org/~granblue/', s: 'ok' },
+    { c: '遊戲作品', l: '碧藍幻想', u: 'https://2cat.org/~granblue/', s: 'ok', f: 'https://2cat.org/granblue/' },
     { c: '遊戲作品', l: '戰車世界', u: 'https://fenrisulfr.org/wot/', s: 'ok' },
     { c: '遊戲作品', l: '戰地風雲', u: 'https://fenrisulfr.org/battlefield/', s: 'ok' },
     { c: '遊戲作品', l: '戰爭雷霆', u: 'https://fenrisulfr.org/war_thunder/', s: 'ok' },
     { c: '遊戲作品', l: '戰機世界', u: 'https://fenrisulfr.org/wowp/', s: 'ok' },
     { c: '遊戲作品', l: '戰艦世界', u: 'https://fenrisulfr.org/wows/', s: 'ok' },
     { c: '遊戲作品', l: '艦隊收藏', u: 'http://acgspace.wsfun.com/kancolle/', s: 'down' },
-    { c: '遊戲作品', l: '魔物獵人', u: 'http://strange-komica.com/MonsterHunter/', s: 'ok' },
+    { c: '遊戲作品', l: '魔物獵人', u: 'http://strange-komica.com/MonsterHunter/', s: 'ok', f: 'http://strange-komica.com/' },
     { c: '遊戲作品', l: '蔚藍檔案', u: 'https://www.gomiga.org/bluearchive/', s: 'ok' },
     { c: '動漫作品', l: '動物朋友', u: 'https://grea.komica1.org/68/', s: 'down' },
     { c: '動漫作品', l: '東方', u: 'https://2cat.org/~touhou/', s: 'ok' },
-    { c: '動漫作品', l: '龍騎士07', u: 'https://2cat.org/~07expansion/', s: 'ok' },
+    { c: '動漫作品', l: '龍騎士07', u: 'https://2cat.org/~07expansion/', s: 'ok', f: 'https://2cat.org/07expansion/' },
     { c: '動漫作品', l: '涼宮', u: 'https://eclair.nagatoyuki.org/szmy/', s: 'ok' },
     { c: '動漫作品', l: '奈葉', u: 'https://nanoha.boguspix.com/', s: 'down' },
     { c: '動漫作品', l: '遊戲王', u: 'https://grea.komica1.org/73/index.htm', s: 'down' },
@@ -166,12 +169,12 @@
     { c: '專題板', l: '魔女', u: 'https://komica.yucie.net/magic/', s: 'down' },
     { c: '專題板', l: '蘿莉', u: 'https://komica.yucie.net/lori/', s: 'down' },
     { c: '專題板', l: '正太', u: 'http://p.komica.acg.club.tw/s/', s: 'ok' },
-    { c: '專題板', l: '御姊', u: 'http://sister.boguspix.com/', s: 'ok' },
+    { c: '專題板', l: '御姊', u: 'http://sister.boguspix.com/', s: 'ok', f: 'https://sister.boguspix.com/' },
     { c: '專題板', l: '兄貴', u: 'http://p.komica.acg.club.tw/a/', s: 'ok' },
     { c: '專題板', l: '妹系', u: 'https://komica.yucie.net/imoto/', s: 'down' },
     { c: '專題板', l: '人外', u: 'https://komica.dbfoxtw.me/jingai/', s: 'ok' },
     { c: '專題板', l: '獸', u: 'https://kemono.wtako.net/kemono/', s: 'ok' },
-    { c: '專題板', l: '機娘', u: 'http://msgirls.boguspix.com/', s: 'ok' },
+    { c: '專題板', l: '機娘', u: 'http://msgirls.boguspix.com/', s: 'ok', f: 'https://msgirls.boguspix.com/' },
     { c: '專題板', l: '返信娘', u: 'https://2cat.komica1.org/~rt/hd/', s: 'down' },
     { c: '專題板', l: 'Lolita Fashion', u: 'https://komica.yucie.net/lolita/', s: 'down' },
     { c: '創作', l: '塗鴉王國', u: 'https://grea.komica1.org/30/index.htm', s: 'down' },
@@ -183,19 +186,19 @@
     { c: '創作', l: '宣傳', u: 'https://luna.komica1.org/20d/index.htm', s: 'down' },
     { c: '飲食', l: '飲食', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%A3%B2%E9%A3%9F', s: 'ok' },
     { c: '飲食', l: '酒', u: 'https://eclair.nagatoyuki.org/beverage/', s: 'ok' },
-    { c: '飲食', l: '咖啡/茶', u: 'https://2cat.org/~coffee/', s: 'ok' },
-    { c: '飲食', l: '烹飪', u: 'https://2cat.org/~cooking/', s: 'ok' },
+    { c: '飲食', l: '咖啡/茶', u: 'https://2cat.org/~coffee/', s: 'ok', f: 'https://2cat.org/coffee/' },
+    { c: '飲食', l: '烹飪', u: 'https://2cat.org/~cooking/', s: 'ok', f: 'https://2cat.org/cooking/' },
     { c: '飲食', l: '素食', u: 'https://kagaminerin.org/vegetarian/', s: 'down' },
     { c: '體育運動', l: '體育', u: 'https://grea.komica1.org/49/index.htm', s: 'down' },
     { c: '體育運動', l: '足球', u: 'https://komica.yucie.net/worldcup/', s: 'down' },
     { c: '體育運動', l: '武術', u: 'https://komica.yucie.net/budou/', s: 'down' },
-    { c: '動物', l: '動物綜合', u: 'https://2cat.org/~animal/', s: 'ok' },
+    { c: '動物', l: '動物綜合', u: 'https://2cat.org/~animal/', s: 'ok', f: 'https://2cat.org/animal/' },
     { c: '動物', l: '犬', u: 'https://komica.yucie.net/dog/', s: 'down' },
     { c: '動物', l: '貓', u: 'https://komica.yucie.net/cat/', s: 'down' },
-    { c: '動物', l: '鳥', u: 'https://2cat.org/~bird/', s: 'ok' },
+    { c: '動物', l: '鳥', u: 'https://2cat.org/~bird/', s: 'ok', f: 'https://2cat.org/bird/' },
     { c: '動物', l: '水族', u: 'https://komica.yucie.net/grearium/', s: 'down' },
     { c: '動物', l: '認養', u: 'https://komica.yucie.net/adopt/', s: 'down' },
-    { c: '桌布壁紙', l: '二次壁', u: 'https://2cat.org/~wallpaper/', s: 'ok' },
+    { c: '桌布壁紙', l: '二次壁', u: 'https://2cat.org/~wallpaper/', s: 'ok', f: 'https://2cat.org/wallpaper/?repair' },
     { c: '桌布壁紙', l: '三次壁', u: 'http://2nee.org/bg_photo', s: 'down' },
     { c: '桌布壁紙', l: 'PSV/手機壁', u: 'https://2cat.komica1.org/~touhonoob/14d/', s: 'down' },
     { c: '電腦網路', l: '電腦/消費電子', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E9%9B%BB%E8%85%A6', s: 'ok' },
@@ -240,17 +243,17 @@
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://2cat.org/~futa/', s: 'down' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '詢問裡', u: 'https://majeur.zawarudo.org/demande/', s: 'ok' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://2cat.org/~know/', s: 'down' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '高解析裡', u: 'https://2cat.org/~hisoura/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '高解析裡', u: 'https://2cat.org/~hisoura/', s: 'ok', f: 'https://2cat.org/hiso/' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://2cat.org/~gifura/', s: 'down' },
     { c: '外部連結', l: '0rz.tw', u: 'http://0rz.tw/', s: 'ok' },
     { c: '外部連結', l: 'Google 日本', u: 'https://www.google.co.jp/ja', s: 'ok' },
     { c: '外部連結', l: 'goo 辞書', u: 'https://dictionary.goo.ne.jp/', s: 'down' },
     { c: '外部連結', l: 'Yahoo! 字典', u: 'https://tw.dictionary.yahoo.com/', s: 'ok' },
     { c: '外部連結', l: '英漢字典', u: 'https://cdict.net/', s: 'ok' },
-    { c: '外部連結', l: '國語辭典', u: 'http://dict.revised.moe.edu.tw/cbdic/index.html', s: 'ok' },
+    { c: '外部連結', l: '國語辭典', u: 'http://dict.revised.moe.edu.tw/cbdic/index.html', s: 'ok', f: 'http://dict.revised.moe.edu.tw/index.jsp' },
     { c: '外部連結', l: 'Excite 翻訳', u: 'https://www.excite.co.jp/world/chinese/', s: 'down' },
     { c: '外部連結', l: 'Babel Fish', u: 'https://www.babelfish.com/', s: 'ok' },
-    { c: '外部連結', l: '維基百科', u: 'https://zh.wikipedia.org/', s: 'ok' },
+    { c: '外部連結', l: '維基百科', u: 'https://zh.wikipedia.org/', s: 'ok', f: 'https://zh.wikipedia.org/wiki/Wikipedia:%E9%A6%96%E9%A1%B5' },
     { c: '外部連結', l: 'Yahoo! 知識+', u: 'https://tw.answers.yahoo.com/', s: 'ok' },
     { c: '外部連結', l: '繁簡轉換', u: 'http://www.tdctrade.com/putonghua/index.htm', s: 'ok' },
     { c: '外部連結', l: '假名注音', u: 'http://www.hiragana.jp/', s: 'ok' },
@@ -275,7 +278,7 @@
   function matchBoard(href, boards) {
     const normalized = normalizeBoardUrl(href);
     if (!normalized) return null;
-    const exact = boards.find((board) => normalizeBoardUrl(board.u) === normalized);
+    const exact = boards.find((board) => normalizeBoardUrl(board.u) === normalized || (board.f && normalizeBoardUrl(board.f) === normalized));
     if (exact) return exact;
     const url = new URL(normalized);
     if (url.origin !== 'https://gaia.komica1.org' || !url.pathname.startsWith('/00b/')) return null;
@@ -315,10 +318,11 @@
     }
     if (u.origin !== b.origin) return null;
     const dir = (p) => p.replace(/[^/]*$/, '');
-    if (dir(u.pathname) !== dir(b.pathname) || !/\/pixmicat\.php$/.test(u.pathname)) return null;
+    // gaia and classic boards: pixmicat.php?res=N; 2cat's newer boards: the board directory itself, ?res=N
+    if (dir(u.pathname) !== dir(b.pathname) || !/\/(pixmicat\.php|index\.php)?$/.test(u.pathname)) return null;
     const res = u.searchParams.get('res') || '';
     if (!/^[1-9]\d{0,11}$/.test(res)) return null;
-    const m = /^#r([1-9]\d{0,11})$/.exec(u.hash);
+    const m = /^#[rsq]([1-9]\d{0,11})$/.exec(u.hash);
     return { res: Number(res), post: m ? Number(m[1]) : null };
   }
 
@@ -338,14 +342,18 @@
 
 
   function omittedCount(text) {
-    const match = /有回應\s+(\d+)\s+篇被省略/.exec(String(text));
+    // gaia and classic: 「有回應 25 篇被省略」; 2cat's newer boards: 「有1541篇回應被省略」
+    const match = /有\s*(?:回應\s*)?(\d+)\s*篇(?:回應)?被省略/.exec(String(text));
     return match ? Number(match[1]) : 0;
   }
 
   function shortTime(nowText, today) {
-    const match = /^(\d{4})\/(\d{1,2})\/(\d{1,2})\([^)]*\)\s+(\d{2}):(\d{2}):\d{2}/.exec(String(nowText).trim());
+    // "2026/10/26(一) 13:16:28.456" on gaia, "26/08/23(日)08:04" on the classic boards (two-digit year, no seconds)
+    const match = /^(\d{4}|\d{2})\/(\d{1,2})\/(\d{1,2})\([^)]*\)\s*(\d{1,2}):(\d{2})/.exec(String(nowText).trim());
     if (!match) return null;
-    const [, year, month, day, hour, minute] = match;
+    const [, yy, month, day, h, minute] = match;
+    const year = yy.length === 2 ? `20${yy}` : yy;
+    const hour = h.padStart(2, '0');
     const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
     if (date.getFullYear() !== Number(year) || date.getMonth() + 1 !== Number(month) || date.getDate() !== Number(day)) return null;
     const time = `${hour}:${minute}`;
@@ -363,7 +371,8 @@
 
   // "1793….png-(1879 KB, 1054x1536)" → { w, h }, so an image keeps its box before it loads
   function fileDims(info) {
-    const m = /(\d{2,5})\s*[x×]\s*(\d{2,5})\s*\)/.exec(String(info));
+    // "…png-(1879 KB, 1054x1536)" on gaia and classic boards, "JPG - 170 KB - 960x1280" on 2cat's newer ones
+    const m = /(?:^|[^\d.])(\d{2,5})\s*[x×]\s*(\d{2,5})(?!\d)/.exec(String(info));
     return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
   }
 
@@ -446,7 +455,8 @@ html.kr-md body { margin: 0 0 0 var(--kr-side) !important; padding: 0 18px 28px 
 /* the pane exists only while a thread is open; closed, the list has the whole width */
 html.kr-md.kr-pane-open body { margin-right: var(--kr-drawer-w) !important; }
 html.kr-docked:not(.kr-pane-open) .kr-pane { display: none; }
-html.kr-md #header, html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
+/* 2cat's newer boards keep the threads and the form inside #header: fold only the header's own chrome */
+html.kr-md #header > :not(:has(#threads, #postform_main)):not(#threads, #postform_main), html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
 html.kr-md #del, html.kr-md #threads .thread > hr { display: none !important; }
 html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; margin: 0 -18px 12px; padding: 10px 18px;
   background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
@@ -493,6 +503,23 @@ html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orien
 html.kr-md #threads .threadpost .post-head .kr-untitled + * { margin-top: 0; }
 html.kr-md.kr-pane-open .kr-site-scroll { right: calc(var(--kr-drawer-w) + 10px) !important; }
 html.kr-md #threads .thread.kr-peek .post.reply { display: block; margin: 8px 0 0 84px; padding: 8px 10px; border-radius: 10px; background: var(--kr-fill) !important; font-size: 13px; }
+/* classic boards: the row is drawn by the script, the site's own post markup stays hidden in the list */
+html.kr-md #threads .kr-wrapped > :not(.kr-row):not(.kr-meta):not(.kr-when):not(.kr-peek-list) { display: none !important; }
+html.kr .kr-peek-list { display: grid; gap: 6px; margin: 8px 0 0 84px; }
+html.kr .kr-peek-item { padding: 8px 10px; border-radius: 10px; background: var(--kr-fill); font-size: 13px; }
+html.kr .kr-peek-head { margin-bottom: 2px; font-size: 11px; color: var(--kr-text2); }
+html.kr .kr-peek-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: pre-line; }
+html.kr .kr-row { display: flex; gap: 12px; align-items: flex-start; }
+html.kr .kr-row-thumb { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 9px; background: var(--kr-fill); }
+html.kr .kr-row-text { flex: 1; min-width: 0; margin-right: 56px; }
+html.kr .kr-row-title { margin-bottom: 2px; font: 600 15px/1.35 var(--kr-font); color: var(--kr-text); }
+html.kr .kr-row-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line;
+  font-size: 14px; line-height: 1.55; color: var(--kr-text); }
+html.kr-md ins.adsbygoogle, html.kr-md #ad0, html.kr-md #ad { display: none !important; }
+/* 2cat's newer boards lay the whole page in an absolute #scroller over the window, past the sidebar and the pane; its #navi
+   is a second list of this page's threads */
+html.kr-md #scroller { position: static !important; width: auto !important; height: auto !important; }
+html.kr-md #navi { display: none !important; }
 html.kr-md .kr-meta { clear: both; display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
 html.kr-md .kr-meta button { border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
 html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
@@ -574,6 +601,7 @@ html.kr .kr-backlinks a { color: var(--kr-accent); text-decoration: none; }
 html.kr .kr-loading, html.kr .kr-pane-error { padding: 18px 0; font-size: 13px; color: var(--kr-text2); }
 html.kr .kr-pane-error { color: #ff453a; }
 html.kr .kr-pane-error .kr-btn { margin: 10px 8px 0 0; }
+html.kr .kr-more { display: flex; width: 100%; height: auto; margin: 4px 0 14px; padding: 8px 12px; }
 html.kr .kr-preview { position: fixed; z-index: 10000; width: min(440px, 90vw); max-height: 52vh; overflow: hidden; padding: 4px 16px; box-sizing: border-box;
   border-radius: 12px; background: var(--kr-glass); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
   border: .5px solid var(--kr-sep); box-shadow: var(--kr-shadow); color: var(--kr-text); font-family: var(--kr-font); pointer-events: none; }
@@ -1080,8 +1108,103 @@ html.kr-portal .kr-side { border-right: 0; }
     handle(no, op);
   }
 
+  // ---- the other Pixmicat boards (2cat and the classic hosts): no element per thread; an OP and its replies are
+  // siblings up to an <hr>. Wrapping them makes them look like gaia's .thread cards to everything below.
+  const UNTITLED = /^(無題|無標題)$/;
+  const STAMP = /(\d{2,4}\/\d{1,2}\/\d{1,2}\([^)]*\)\s*\d{1,2}:\d{2}(?::\d{2})?)\s*ID:\s*([A-Za-z0-9./+]+)/;
+  const site = { kind: 'gaia', mediaBase: null, resPrefix: null };
+
+  function isPixmicat(root) {
+    return !!root.querySelector('#threads > div.threadpost[id^="r"]') && !root.querySelector('#threads .thread[data-no]');
+  }
+
+  function wrapThreads(threads) {
+    if (!threads) return;
+    let card = null;
+    for (const node of [...threads.childNodes]) {
+      if (node.nodeType === 1 && node.matches('div.threadpost[id^="r"]')) {
+        card = threads.ownerDocument.createElement('div');
+        card.className = 'thread kr-wrapped';
+        card.dataset.no = node.id.slice(1);
+        node.before(card);
+      }
+      if (!card) continue;
+      const end = node.nodeType === 1 && node.tagName === 'HR';
+      card.append(node);
+      if (end) card = null;
+    }
+    // replies follow the OP on some boards and sit inside it on others
+    for (const post of threads.querySelectorAll('.kr-wrapped div.threadpost[id^="r"], .kr-wrapped div.reply[id^="r"]')) {
+      post.classList.add('post');
+      post.dataset.no = post.id.slice(1);
+      // 2cat's newer boards mark the OP .reply as well; here .reply means a reply
+      if (post.classList.contains('threadpost')) post.classList.remove('reply');
+    }
+  }
+
+  // a post's own text, without its body: where the classic boards keep the date, ID and file line
+  function headTextOf(post) {
+    const shell = post.cloneNode(true);
+    for (const n of shell.querySelectorAll('.quote, .post')) n.remove();
+    return shell.textContent;
+  }
+
+  function stampOf(post) {
+    return post.querySelector('.post-head .now')?.textContent || STAMP.exec(headTextOf(post))?.[1] || '';
+  }
+
+  // 2cat's newer boards fill image links in with script; the live page shows where they point
+  function mediaBase() {
+    if (site.mediaBase) return site.mediaBase;
+    const live = document.querySelector('#threads a.imglink[href*="/src/"]')?.href;
+    if (live) return (site.mediaBase = live.slice(0, live.indexOf('/src/')));
+    return `https://cat.2nyan.org${location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '')}`;
+  }
+
+  // the board's own reply links say how its thread URLs look: pixmicat.php?res=N, ?res=N, /board/?res=N
+  function threadUrl(res) {
+    if (!site.resPrefix) {
+      const href = [...document.querySelectorAll('#threads a[href*="res="]')].map((a) => a.getAttribute('href')).find((h) => threadLink(h, location.href));
+      site.resPrefix = /^(.*?[?&]res=)\d+/.exec(href || '')?.[1] || 'pixmicat.php?res=';
+    }
+    return `${site.resPrefix}${res}`;
+  }
+
+  // the first match that belongs to this post and not to a reply nested in it
+  const own = (post, selector) => [...post.querySelectorAll(selector)].find((n) => n.closest('.post') === post) || null;
+
+  function readPixmicatPost(post) {
+    const head = headTextOf(post);
+    const stamp = STAMP.exec(head);
+    const fileA = own(post, 'a[href*="/src/"]');
+    const imglink = own(post, 'a.imglink[title]');
+    const img = (fileA || imglink)?.querySelector('img') || own(post, 'img.img');
+    let src = fileA?.getAttribute('href') || '';
+    let thumb = img?.getAttribute('data-original') || '';
+    if (!src && imglink?.title && /\.\w{3,4}$/.test(imglink.title)) {
+      const base = mediaBase();
+      src = `${base}/src/${imglink.title}`;
+      if (img?.alt) thumb = `${base}/thumb/${img.alt}s.jpg`;
+    }
+    if (!thumb && imglink && img?.alt) thumb = `${mediaBase()}/thumb/${img.alt}s.jpg`;
+    if (!thumb && img && !/\/(trans|white)\.png$/.test(img.getAttribute('src') || '')) thumb = img.getAttribute('src') || '';
+    const abs = (u) => (u ? new URL(u, location.href).href : '');
+    const info = own(post, '.imglink2')?.textContent.trim() || /[\w.-]+\.(?:jpe?g|png|gif|webp|webm|mp4)-\([^)]*\)/i.exec(head)?.[0] || '';
+    return {
+      no: Number(post.getAttribute('data-no')),
+      op: post.classList.contains('threadpost'),
+      title: own(post, '.title')?.textContent.trim() || '',
+      name: own(post, '.name')?.textContent.trim() || '',
+      time: (stamp && shortTime(stamp[1], new Date())) || '',
+      id: stamp?.[2] || '',
+      media: src ? { src: abs(src), thumb: abs(thumb), kind: mediaKind(src), dims: fileDims(info), info, spoiler: false } : null,
+      quote: own(post, '.quote'),
+    };
+  }
+
   // ---- reading a thread out of the site's markup: a board card, or a thread page fetched in the background
   function readPosts(thread) {
+    if (thread.classList.contains('kr-wrapped')) return [...thread.querySelectorAll('.post[data-no]')].map(readPixmicatPost);
     return [...thread.querySelectorAll('.post[data-no]')].map((post) => {
       const head = post.querySelector('.post-head');
       const headText = head?.textContent || '';
@@ -1155,7 +1278,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const backs = new Map();
     const articles = posts.map((p) => {
       const art = el('article', { class: `kr-post${p.op ? ' kr-post-op' : ''}`, id: `kr-p${p.no}`, 'data-no': String(p.no) });
-      if (p.op && p.title && p.title !== '無題') art.append(el('h2', { class: 'kr-post-title' }, p.title));
+      if (p.op && p.title && !UNTITLED.test(p.title)) art.append(el('h2', { class: 'kr-post-title' }, p.title));
       const head = el('header', { class: 'kr-post-head' });
       head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
       if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
@@ -1165,8 +1288,11 @@ html.kr-portal .kr-side { border-right: 0; }
       if (p.media) art.append(renderMedia(p.media));
       const text = el('div', { class: 'kr-post-text' });
       if (p.quote) text.append(...cleanQuote(p.quote).childNodes);
-      for (const a of text.querySelectorAll('a[href]')) {
-        const href = a.getAttribute('href');
+      for (const a of text.querySelectorAll('a')) {
+        // classic boards write >>No.N as a script link, which cleanQuote has already emptied: keep it as a quote
+        const bare = /^>>\s*(?:No\.)?(\d+)$/.exec(a.textContent.trim());
+        const href = a.getAttribute('href') || (bare ? `#r${bare[1]}` : '');
+        if (!href) continue;
         const local = /^#r(\d+)$/.exec(href);
         const link = local ? { res, post: Number(local[1]) } : threadLink(href, location.href);
         if (link && link.res === res && link.post && byNo.has(link.post)) {
@@ -1197,29 +1323,62 @@ html.kr-portal .kr-side { border-right: 0; }
       art.append(foot);
     }
     pane.body.replaceChildren(...articles, ...(note ? [el('div', { class: 'kr-loading' }, note)] : []));
+    if (posts.more) {
+      const more = el('button', { type: 'button', class: 'kr-btn kr-more' }, '這串分頁了，這裡是最後一頁 · 載入全部');
+      more.addEventListener('click', () => openThread(res, { all: true }));
+      articles[0].after(more);
+    }
   }
 
   // ---- the detail pane
   const threadCache = new Map();
   const CACHE_MS = 60000;
 
-  function loadThread(res, fresh = false) {
-    const hit = threadCache.get(res);
+  async function fetchThread(res, page = null, param = 'page') {
+    const url = threadUrl(res);
+    const r = await fetch(page === null ? url : `${url}${url.includes('?') ? '&' : '?'}${param}=${page}`, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`伺服器回應 HTTP ${r.status}`);
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    if (site.kind === 'pixmicat') wrapThreads(doc.getElementById('threads'));
+    const thread = doc.querySelector(`#threads .thread[data-no="${res}"]`);
+    if (!thread) throw new Error('這一頁裡沒有這串（可能已被刪除或下沉）');
+    const posts = readPosts(thread);
+    // 2cat shows a long thread a page at a time and opens on the last one: [0] [1] … [<b>10</b>],
+    // as ?res=N&page=P on the newer boards and ?res=N&page_num=P on the classic ones
+    const links = [...doc.querySelectorAll('#page_switch a[href*="res="]')].map((a) => /[?&](page(?:_num)?)=(\d+)/.exec(a.getAttribute('href'))).filter(Boolean);
+    const nums = links.map((m) => Number(m[2]));
+    posts.param = links[0]?.[1] || 'page';
+    posts.page = links.length ? Number(doc.querySelector('#page_switch b')?.textContent.trim()) : NaN;
+    posts.last = Math.max(0, ...nums, posts.page || 0);
+    posts.more = nums.length > 0;
+    return posts;
+  }
+
+  function cached(key, fresh, load) {
+    const hit = threadCache.get(key);
     if (hit && !fresh && Date.now() - hit.at < CACHE_MS) return hit.promise;
-    const promise = fetch(`pixmicat.php?res=${res}`, { credentials: 'same-origin' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`伺服器回應 HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((html) => {
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const thread = doc.querySelector(`#threads .thread[data-no="${res}"]`);
-        if (!thread) throw new Error('這一頁裡沒有這串（可能已被刪除或下沉）');
-        return readPosts(thread);
-      });
-    threadCache.set(res, { at: Date.now(), promise });
-    promise.catch(() => threadCache.delete(res));
+    const promise = load();
+    threadCache.set(key, { at: Date.now(), promise });
+    promise.catch(() => threadCache.delete(key));
     return promise;
+  }
+
+  const loadThread = (res, fresh = false) => cached(res, fresh, () => fetchThread(res));
+
+  // every page of a paged thread, merged; the site's own ALL link is only the latest 100 replies
+  function loadWholeThread(res, fresh = false) {
+    return cached(`${res}:all`, fresh, async () => {
+      const base = await loadThread(res, fresh);
+      const byNo = new Map(base.map((p) => [p.no, p]));
+      const want = [];
+      for (let n = 0; n <= base.last; n++) if (n !== base.page) want.push(n);
+      // ponytail: four at a time is polite enough for the few-dozen-page threads seen; a progress note if longer ones appear
+      const worker = async () => {
+        while (want.length) for (const p of await fetchThread(res, want.shift(), base.param)) if (!byNo.has(p.no)) byNo.set(p.no, p);
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      return [...byNo.values()].sort((a, b) => b.op - a.op || a.no - b.no);
+    });
   }
 
   function setupPane() {
@@ -1364,10 +1523,10 @@ html.kr-portal .kr-side { border-right: 0; }
     // an untitled thread is named by its first line, as a mail without subject would be
     const quote = op?.quote || card?.querySelector('.threadpost .quote');
     const first = (quote?.innerText || quote?.textContent || '').split('\n').map((l) => l.trim()).find((l) => l && !/^>>\d+$/.test(l)) || '';
-    p.title.textContent = t && t !== '無題' ? t : first.slice(0, 60) || `No.${res}`;
+    p.title.textContent = t && !UNTITLED.test(t) ? t : first.slice(0, 60) || `No.${res}`;
     const count = posts ? `${posts.length - 1} 則回應` : card?.querySelector('.kr-meta-count')?.textContent.replace(/^💬\s*/, '') || '';
     p.sub.textContent = [`No.${res}`, count].filter(Boolean).join(' · ');
-    p.newtab.href = `pixmicat.php?res=${res}`;
+    p.newtab.href = threadUrl(res);
   }
 
   function flashPost(no) {
@@ -1382,7 +1541,7 @@ html.kr-portal .kr-side { border-right: 0; }
 
   let openTimer = null;
 
-  async function openThread(res, { post = null, quote = null, fresh = false } = {}) {
+  async function openThread(res, { post = null, quote = null, fresh = false, all = false } = {}) {
     const p = state.pane;
     if (!p || !res) return;
     clearTimeout(openTimer);
@@ -1398,11 +1557,17 @@ html.kr-portal .kr-side { border-right: 0; }
     if (quote) quoteIntoComposer(quote);
     if (switching) {
       p.full = false;
+      p.all = false;
       p.body.scrollTop = 0;
       // what the board already shows (the OP and its latest replies) goes up at once; the rest follows the fetch
       const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
       if (card) renderPosts(res, readPosts(card), '正在載入其餘回應⋯');
       else p.body.replaceChildren(el('div', { class: 'kr-loading' }, '載入中⋯'));
+    }
+    if (all && !p.all) {
+      p.all = true;
+      p.full = false;
+      p.body.querySelector('.kr-more')?.replaceWith(el('div', { class: 'kr-loading' }, '正在載入全部回應⋯'));
     }
     if (p.full && !fresh) {
       if (post) flashPost(post);
@@ -1410,7 +1575,7 @@ html.kr-portal .kr-side { border-right: 0; }
     }
     let posts;
     try {
-      posts = await loadThread(res, fresh);
+      posts = await (p.all ? loadWholeThread(res, fresh) : loadThread(res, fresh));
     } catch (err) {
       if (p.res !== res) return;
       const box = el('div', { class: 'kr-pane-error' }, `沒能載入這串：${err.message}`);
@@ -1443,6 +1608,7 @@ html.kr-portal .kr-side { border-right: 0; }
     selectCard(null);
     p.res = null;
     p.full = false;
+    p.all = false;
     p.body.replaceChildren();
     p.preview.hidden = true;
     composerNew();
@@ -1495,7 +1661,7 @@ html.kr-portal .kr-side { border-right: 0; }
     for (const card of document.querySelectorAll('#threads .thread')) {
       const replies = card.querySelectorAll('.post.reply');
       const total = replies.length + omittedCount(card.querySelector('.warn_txt2')?.textContent || '');
-      const time = replies.length ? shortTime(replies[replies.length - 1].querySelector('.now')?.textContent || '', new Date()) : null;
+      const time = replies.length ? shortTime(stampOf(replies[replies.length - 1]), new Date()) : null;
       const label = total ? `💬 ${total} 則回應${time ? ` · 最後 ${time}` : ''}` : '還沒有回應';
       let meta = card.querySelector('.kr-meta');
       if (!meta) {
@@ -1503,9 +1669,21 @@ html.kr-portal .kr-side { border-right: 0; }
         meta.append(el('span', { class: 'kr-meta-count' }));
         card.append(meta);
         // the row keeps only its title and text; when it was posted goes to the corner, as in a mail list
+        // classic boards have no markup to restyle into a row: draw one from the OP
+        if (card.classList.contains('kr-wrapped')) {
+          const op = readPixmicatPost(card.querySelector('.threadpost'));
+          const row = el('div', { class: 'kr-row' });
+          const thumb = op.media && (op.media.thumb || (op.media.kind === 'image' ? op.media.src : ''));
+          if (thumb) row.append(el('img', { class: 'kr-row-thumb', src: thumb, alt: '', loading: 'lazy', decoding: 'async' }));
+          const words = el('div', { class: 'kr-row-text' });
+          if (op.title && !UNTITLED.test(op.title)) words.append(el('div', { class: 'kr-row-title' }, op.title));
+          words.append(el('div', { class: 'kr-row-snippet' }, (op.quote?.innerText || op.quote?.textContent || '').trim()));
+          row.append(words);
+          card.prepend(row);
+        }
         const opTitle = card.querySelector('.threadpost .title');
-        if (opTitle?.textContent.trim() === '無題') opTitle.classList.add('kr-untitled');
-        const when = shortTime(card.querySelector('.threadpost .now')?.textContent || '', new Date());
+        if (UNTITLED.test(opTitle?.textContent.trim() || '')) opTitle.classList.add('kr-untitled');
+        const when = shortTime(stampOf(card.querySelector('.threadpost') || card), new Date());
         if (when) card.append(el('span', { class: 'kr-when' }, when));
       }
       if (meta.firstChild.textContent !== label) meta.firstChild.textContent = label;
@@ -1514,6 +1692,7 @@ html.kr-portal .kr-side { border-right: 0; }
         peek = el('button', { type: 'button' });
         peek.addEventListener('click', () => {
           card.classList.toggle('kr-peek');
+          if (card.classList.contains('kr-wrapped')) peekList(card);
           peek.textContent = card.classList.contains('kr-peek') ? '收起 ▴' : `展開最新 ${card.querySelectorAll('.post.reply').length} 則 ▾`;
         });
         meta.append(peek);
@@ -1523,15 +1702,33 @@ html.kr-portal .kr-side { border-right: 0; }
     }
   }
 
+  // a drawn row peeks with drawn replies too: the classic markup has nothing to show as is
+  function peekList(card) {
+    card.querySelector('.kr-peek-list')?.remove();
+    if (!card.classList.contains('kr-peek')) return;
+    const list = el('div', { class: 'kr-peek-list' });
+    for (const reply of card.querySelectorAll('.post.reply')) {
+      const p = readPixmicatPost(reply);
+      const item = el('div', { class: 'kr-peek-item' });
+      item.append(el('div', { class: 'kr-peek-head' }, [p.name, p.time].filter(Boolean).join(' · ')), el('div', { class: 'kr-peek-text' }, (p.quote?.innerText || p.quote?.textContent || '').trim()));
+      list.append(item);
+    }
+    card.querySelector('.kr-meta').before(list);
+  }
+
   function initBoard() {
     root.classList.add('kr-md');
     if (window.name !== 'cont' || window.top === window) setupSidebar(BOARDS);
+    if (isPixmicat(document)) {
+      site.kind = 'pixmicat';
+      wrapThreads(document.getElementById('threads'));
+    }
     setupToolbar();
     setupPane();
     composerNew();
     decorateThreads();
     const threads = document.getElementById('threads');
-    // one pass per frame at most, and none for our own footers
+    // one pass per frame at most, and none for our own footers; new threads on a classic board get wrapped first
     let queued = false;
     if (threads) {
       new MutationObserver((records) => {
@@ -1539,6 +1736,7 @@ html.kr-portal .kr-side { border-right: 0; }
         queued = true;
         requestAnimationFrame(() => {
           queued = false;
+          if (site.kind === 'pixmicat') wrapThreads(threads);
           decorateThreads();
         });
       }).observe(threads, { childList: true, subtree: true });

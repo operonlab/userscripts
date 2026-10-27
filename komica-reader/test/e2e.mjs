@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
-const MATCHES = ['https://gaia.komica1.org/00b/', 'https://komica1.org/'];
+const MATCHES = ['https://gaia.komica1.org/00b/', 'https://komica1.org/', 'https://2cat.org/', 'https://2cat.uk/', 'https://cat.2nyan.org/'];
 const out = process.argv[2] ? path.resolve(process.argv[2]) : null;
 if (out) mkdirSync(out, { recursive: true });
 
@@ -64,7 +64,7 @@ try {
   // --- toolbar replaces the site's header
   const bar = await page.evaluate(() => ({
     title: document.querySelector('.kr-toolbar-title')?.textContent,
-    headerHidden: getComputedStyle(document.getElementById('header')).display === 'none',
+    headerHidden: getComputedStyle(document.getElementById('toplink')).display === 'none' && getComputedStyle(document.querySelector('#header h1')).display === 'none',
     themeInMenu: !!document.querySelector('.kr-menu #theme-selector'),
     online: !!document.querySelector('.kr-toolbar #online-counter'),
     menuLinks: document.querySelectorAll('.kr-menu a').length,
@@ -389,6 +389,77 @@ try {
     check('portal: 綜合 opens in cont with list and pane, no second sidebar', await cont.evaluate(() => document.documentElement.classList.contains('kr-md') && !!document.querySelector('.kr-pane') && !document.querySelector('.kr-side')));
     await page.waitForTimeout(1500);
     await shot(page, '8-portal.png');
+  }
+
+  // --- 2cat: the classic template (career: replies inside the OP) and the newer one (cellphone: whole page in #scroller,
+  // long threads paged). The truth is the site's own markup, fetched and counted here, every page of a paged thread.
+  for (const [name, url, label] of [['career', 'https://2cat.org/career/', '職業'], ['cellphone', 'https://2cat.org/cellphone/', '手機遊戲']]) {
+    const r2 = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch((e) => e);
+    if (!r2 || r2 instanceof Error || !r2.ok() || !(await page.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null))) {
+      console.log(`UNVERIFIABLE  2cat ${name} did not load: ${r2 instanceof Error ? r2.message : r2?.status()}`);
+      code = 2;
+      continue;
+    }
+    await page.waitForLoadState('load').catch(() => {});
+    await page.waitForTimeout(1500);
+    const list = await page.evaluate(async () => {
+      const doc = new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html');
+      const rows = [...document.querySelectorAll('#threads .thread')];
+      const box = (n) => n.getBoundingClientRect();
+      return {
+        rows: rows.length,
+        ops: doc.querySelectorAll('#threads div.threadpost').length,
+        metas: rows.every((row) => row.querySelectorAll('.kr-meta-count').length === 1),
+        repliesShown: [...document.querySelectorAll('#threads .post.reply')].filter((n) => n.getClientRects().length && !n.closest('.kr-peek')).length,
+        widths: [...new Set(rows.slice(0, 4).map((row) => Math.round(box(row).width)))],
+        scroller: !!document.getElementById('scroller'),
+        current: document.querySelector('.kr-side-row[aria-current="page"] a')?.textContent,
+      };
+    });
+    check(`2cat ${name}: one row per thread, replies folded, one count each`, list.rows > 0 && list.rows === list.ops && list.metas && list.repliesShown === 0, JSON.stringify(list));
+    check(`2cat ${name}: the rows are as wide as each other (nothing floats beside them)`, list.widths.length === 1, JSON.stringify(list.widths));
+    check(`2cat ${name}: the sidebar marks ${label} as the current board`, list.current === label, String(list.current));
+    // the thread with the most replies: on cellphone that is the paged one
+    const res = await page.evaluate(() => {
+      const count = (row) => Number(/(\d+) 則回應/.exec(row.querySelector('.kr-meta-count').textContent)?.[1] || 0);
+      return Number([...document.querySelectorAll('#threads .thread')].sort((a, b) => count(b) - count(a))[0].dataset.no);
+    });
+    const metaCount = await page.evaluate((no) => Number(/(\d+) 則回應/.exec(document.querySelector(`#threads .thread[data-no="${no}"] .kr-meta-count`).textContent)?.[1] || 0), res);
+    await page.locator(`#threads .thread[data-no="${res}"] .kr-meta-count`).click();
+    await page.waitForSelector('.kr-pane .kr-post', { timeout: 5000 }).catch(() => null);
+    await page.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => null);
+    const truth = await page.evaluate(async (href) => {
+      const read = async (u) => new DOMParser().parseFromString(await (await fetch(u)).text(), 'text/html');
+      const first = await read(href);
+      const others = [...new Set([...first.querySelectorAll('#page_switch a[href*="page"]')].map((a) => a.getAttribute('href')).filter((h) => /[?&]page(?:_num)?=\d+$/.test(h)))];
+      const ids = new Set();
+      for (const doc of [first, ...(await Promise.all(others.map(read)))]) for (const n of doc.querySelectorAll('#threads div.threadpost[id^="r"], #threads div.reply[id^="r"]')) ids.add(n.id);
+      return { posts: ids.size, pages: others.length + 1 };
+    }, await page.evaluate(() => document.querySelector('.kr-pane a.kr-btn[target="_blank"]')?.href));
+    const firstView = await page.evaluate(() => ({ posts: document.querySelectorAll('.kr-pane .kr-post').length, more: !!document.querySelector('.kr-pane .kr-more') }));
+    if (truth.pages > 1) {
+      check(`2cat ${name}: a paged thread opens on its last page and offers the rest`, firstView.more && firstView.posts < truth.posts, JSON.stringify({ firstView, truth }));
+      await page.locator('.kr-pane .kr-more').click();
+      await page.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading, .kr-pane .kr-more'), null, { timeout: 90000 }).catch(() => null);
+    } else {
+      console.log(`NOTE  2cat ${name}: the longest thread on the page is not paged; paging not exercised`);
+    }
+    const whole = await page.evaluate(() => ({ posts: document.querySelectorAll('.kr-pane .kr-post').length, sub: document.querySelector('.kr-pane-sub').textContent, resto: document.querySelector('#postform_main input[name="resto"]')?.value }));
+    check(`2cat ${name}: the whole thread is drawn — every post on every page — and the row's count agrees`, whole.posts === truth.posts && whole.sub.includes(`${truth.posts - 1} 則回應`) && metaCount === truth.posts - 1, JSON.stringify({ whole, truth, metaCount }));
+    await page.waitForTimeout(1500);
+    const media = await page.evaluate(() => {
+      const m = document.querySelector('.kr-pane .kr-post-media img');
+      return m ? { src: m.getAttribute('src').slice(-48), natural: m.naturalWidth } : null;
+    });
+    check(`2cat ${name}: images in the thread are the originals`, !media || (/\/src\//.test(media.src) && media.natural > 0), JSON.stringify(media));
+    const no = await page.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op) .kr-post-no')].at(-1)?.dataset.no);
+    await page.locator(`.kr-pane .kr-post-no[data-no="${no}"]`).click();
+    const quoted2 = await page.evaluate(() => ({ value: document.getElementById('fcom')?.value, resto: document.querySelector('#postform_main input[name="resto"]')?.value, state: document.getElementById('postform_main').dataset.krState }));
+    check(`2cat ${name}: No. quotes into the board's form, which replies to this thread`, quoted2.value?.includes(`>>${no}\n`) && quoted2.resto === String(res) && quoted2.state === 'expanded', JSON.stringify({ ...quoted2, res, no }));
+    await page.keyboard.press('Escape');
+    const fit = await page.evaluate(() => ({ rowsRight: Math.max(...[...document.querySelectorAll('#threads .thread')].map((n) => Math.round(n.getBoundingClientRect().right))), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) }));
+    check(`2cat ${name}: the list stays left of the open pane`, fit.rowsRight <= fit.paneLeft, JSON.stringify(fit));
+    await shot(page, `9-2cat-${name}.png`);
   }
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
