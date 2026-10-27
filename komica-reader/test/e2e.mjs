@@ -286,7 +286,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => null);
   const newest = await page.evaluate(() => Math.max(...[...document.querySelectorAll('[data-no]')].map((n) => Number(n.dataset.no)).filter(Number.isFinite)));
   const threadPage = (posts) => `<div id="threads"><div class="thread" data-no="${target}"><div class="post threadpost" data-no="${target}"><div class="quote">OP</div></div>${posts.map(([no, text]) => `<div class="post reply" data-no="${no}"><div class="quote">${text}</div></div>`).join('')}</div></div>`;
-  const verdict = (text, html, ms = 10000) => page.evaluate(async ({ text, html, ms }) => {
+  const verdict = (text, html, ms = 35000) => page.evaluate(async ({ text, html, ms }) => {
     const ta = document.getElementById('fcom');
     const status = () => document.querySelector('#postform_main .kr-composer-status').textContent;
     ta.value = text;
@@ -304,9 +304,20 @@ try {
   check('posting: an older post with the same short text is not proof — the text stays', oldMatch.kept && oldMatch.status.includes('看不出'), JSON.stringify({ ...oldMatch, newest }));
   const reads = await verdict(stamp, '<script>var here = location.href;</script><p>錯誤</p>');
   check('posting: a result page that only reads its address is not taken for a redirect', reads.kept && reads.status.includes('看不出'), JSON.stringify(reads));
-  const stuck = await verdict(stamp, '<meta http-equiv="refresh" content="999"><p>轉址中</p>', 20000);
+  const stuck = await verdict(stamp, '<meta http-equiv="refresh" content="999"><p>轉址中</p>', 45000);
   check('posting: a redirect that never arrives ends in "cannot tell", text kept', stuck.kept && stuck.status.includes('看不出'), JSON.stringify(stuck));
-  const landed = await verdict(stamp, threadPage([[newest + 1, stamp]]));
+  // far above anything real, so a reply posted meanwhile by someone else cannot outrank it
+  const mine = newest + 100000;
+  const late = await page.evaluate(async (html) => {
+    document.querySelector('iframe[name="kr-sink"]').srcdoc = html;
+    const end = Date.now() + 35000;
+    while (document.getElementById('fcom').value && Date.now() < end) await new Promise((r) => setTimeout(r, 200));
+    return { status: document.querySelector('#postform_main .kr-composer-status').textContent, cleared: !document.getElementById('fcom').value };
+  }, threadPage([[mine, stamp]]));
+  check('posting: a result that turns up after the wait gave up is still read', late.cleared && late.status === '已送出', JSON.stringify(late));
+  const imageOnly = await verdict('>>123\n', threadPage([[mine + 1, '']]));
+  check('posting: an image or quote alone cannot be told from anyone else\'s post — the box stays', imageOnly.kept && imageOnly.status.includes('看不出'), JSON.stringify(imageOnly));
+  const landed = await verdict(stamp, threadPage([[mine + 2, stamp]]));
   check('posting: the post found on the page it landed on, newer than anything known, clears the text', !landed.kept && landed.status === '已送出', JSON.stringify(landed));
   await page.keyboard.press('Escape');
 
@@ -384,6 +395,14 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.kr-side');
   check('sidebar: the 18禁 unlock survives reload', await page.evaluate(() => document.querySelectorAll('.kr-side-row a[href="https://2cat.org/touhoux/"]').length === 1));
+  // text the browser puts back after a reload is not a draft written here: opening a thread still points the form at it
+  await page.evaluate(() => (document.getElementById('fcom').value = '這是瀏覽器還原的舊字'));
+  const restoredRes = await page.evaluate(() => document.querySelector('#threads .thread')?.dataset.no);
+  await page.locator(`#threads .thread[data-no="${restoredRes}"] .kr-meta-count`).click();
+  const restored = await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').value);
+  check('composer: text restored by the browser does not hold the form on 發新串', restored === restoredRes, JSON.stringify({ restored, restoredRes }));
+  await page.evaluate(() => (document.getElementById('fcom').value = ''));
+  await page.keyboard.press('Escape');
   check('sidebar: starred board survives reload under ★ 書籤', await page.evaluate(() => {
     const first = document.querySelector('.kr-side-group');
     return first?.textContent.includes('★ 書籤') && !!first.querySelector('a[href="https://gaia.komica1.org/00b/index.htm"]');

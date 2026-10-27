@@ -415,11 +415,11 @@
   }
 
   // a post is confirmed only by a post newer than any known when it was sent that holds what was sent:
-  // an older post saying 推 too proves nothing
+  // an older post saying 推 too proves nothing, and with nothing to look for (an image alone) nothing can be told
   function confirmPosted(posts, { after, probe }) {
-    if (!after) return false;
     const squash = (text) => String(text).replace(/\s+/g, '');
-    return posts.some((p) => p.no > after && (!probe || squash(p.text).includes(squash(probe))));
+    if (!after || !squash(probe)) return false;
+    return posts.some((p) => p.no > after && squash(p.text).includes(squash(probe)));
   }
 
   // links and images in post text may go to the web and nowhere else; the URL parser decides, as the browser will
@@ -961,7 +961,9 @@ html.kr-portal .kr-side { border-right: 0; }
   // ---- composer: the site's own #postform_main, made to float. It is never moved, cloned or display:none'd:
   // the Turnstile frame inside it would reload and drop its token.
   // sending: what was sent, to where, and the newest post number known then; the verdict reads that, not the form as it is now
-  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, sending: null, timer: null, category: '' };
+  // unsure: the last send that ended in 看不出, whose result page may still turn up late
+  // touched: the reader has written in the form on this page (text the browser restores on reload is not a draft)
+  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, sending: null, unsure: null, timer: null, touched: false, category: '' };
 
   function setupComposer() {
     const form = document.getElementById('postform_main');
@@ -997,11 +999,17 @@ html.kr-portal .kr-side { border-right: 0; }
       // builds a FormData from the form: a page that never comes back ends in "看不出", not in 送出中 for ever
       form.addEventListener('formdata', () => {
         const known = [...document.querySelectorAll('[data-no]')].map((n) => Number(n.dataset.no)).filter(Number.isFinite);
-        composer.sending = { mode: composer.mode, target: composer.target, text: document.getElementById('fcom')?.value || '', subject: document.getElementById('fsub')?.value || '', after: Math.max(0, ...known) };
+        const sending = { mode: composer.mode, target: composer.target, text: document.getElementById('fcom')?.value || '', subject: document.getElementById('fsub')?.value || '', after: Math.max(0, ...known) };
+        // the newest post when it was sent, not when the page loaded: replies since then are other people's. If ours
+        // lands before this answers, it counts as known and the verdict is 看不出 — the safe side
+        sending.baseline = sending.mode === 'reply' && sending.target ? loadThread(sending.target, true).then((posts) => Math.max(0, ...posts.map((p) => p.no)), () => 0) : Promise.resolve(0);
+        composer.sending = sending;
+        composer.unsure = null;
         setStatus('送出中⋯');
         waitForResult(60000, '等不到回應頁');
       });
       sink.addEventListener('load', () => onPosted(sink));
+      for (const type of ['input', 'change']) form.addEventListener(type, () => (composer.touched = true));
     }
     collapse();
   }
@@ -1029,7 +1037,8 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   function onPosted(sink) {
-    const sending = composer.sending;
+    // a result page that turns up after the wait gave up is still read
+    const sending = composer.sending || composer.unsure;
     if (!sending) return;
     let doc = null;
     try {
@@ -1048,27 +1057,39 @@ html.kr-portal .kr-side { border-right: 0; }
     else settle(sending, outcome, doc);
   }
 
+  const within = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('伺服器太久沒回應')), ms))]);
+
   // the text is cleared only when the post itself is found: on the page it landed on, or in the refetched thread
-  function settle(sending, outcome, doc) {
-    clearTimeout(composer.timer);
-    composer.sending = null;
-    resetTurnstile();
-    const look = { after: sending.after, probe: postedProbe(sending.text) };
-    const textOf = (thread) => readPosts(thread).map((p) => ({ no: p.no, op: p.op, text: p.quote?.textContent || '' }));
+  async function settle(sending, outcome, doc) {
+    if (composer.sending === sending) {
+      clearTimeout(composer.timer);
+      composer.sending = null;
+      // only for the send in hand: a late answer must not drop the token of the next post being written
+      resetTurnstile();
+    }
     const unsure = (why) => {
+      composer.unsure = sending;
       // a newer post on its way has the status line now
       if (composer.sending) return;
       setStatus(`看不出有沒有送出（${why}）。內容還在框裡，請按 ↻ 或在新分頁確認。`, true);
     };
+    const probe = postedProbe(sending.text);
+    // an image or quotes alone leave nothing to tell this post from anyone else's
+    if (!probe) return unsure(outcome.message || '只有圖或引用，認不出是哪一則');
+    const look = { probe, after: Math.max(sending.after, await within(sending.baseline, 10000).catch(() => 0)) };
+    const textOf = (thread) => readPosts(thread).map((p) => ({ no: p.no, op: p.op, text: p.quote?.textContent || '' }));
     const landed = outcome.kind === 'ok' ? doc.getElementById('threads') : null;
     if (landed && site.kind === 'pixmicat') wrapThreads(landed);
     if (sending.mode === 'reply' && sending.target) {
       const here = landed?.querySelector(`.thread[data-no="${sending.target}"]`);
       if (here && confirmPosted(textOf(here), look)) return posted(sending);
-      loadThread(sending.target, true).then(
-        (posts) => (confirmPosted(posts.map((p) => ({ no: p.no, text: p.quote?.textContent || '' })), look) ? posted(sending) : unsure(outcome.message || '串裡找不到這則')),
-        (err) => unsure(err.message),
-      );
+      try {
+        const posts = await within(loadThread(sending.target, true), 20000);
+        if (confirmPosted(posts.map((p) => ({ no: p.no, text: p.quote?.textContent || '' })), look)) return posted(sending);
+        unsure(outcome.message || '串裡找不到這則');
+      } catch (err) {
+        unsure(err.message);
+      }
       return;
     }
     const ops = landed ? [...landed.querySelectorAll('.thread')].flatMap(textOf).filter((p) => p.op) : [];
@@ -1077,7 +1098,7 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   function posted(sending) {
-    setStatus('已送出');
+    if (composer.unsure === sending) composer.unsure = null;
     const ta = document.getElementById('fcom');
     // only what was sent is cleared: text typed since then stays
     if (ta?.value === sending.text) {
@@ -1086,23 +1107,27 @@ html.kr-portal .kr-side { border-right: 0; }
       if (subject?.value === sending.subject) subject.value = '';
       const file = document.getElementById('fupfile');
       if (file) file.value = '';
+      composer.touched = false;
       collapse();
     }
     if (sending.mode === 'reply') {
       if (state.pane?.res === sending.target) openThread(sending.target, { fresh: true });
       // the emptied form goes back to the open thread, or to 發新串
-      if (hasDraft()) return;
-      if (state.pane?.res) composerReply(state.pane.res);
-      else composerNew();
+      if (!hasDraft()) {
+        if (state.pane?.res) composerReply(state.pane.res);
+        else composerNew();
+      }
     } else if (!hasDraft()) {
       location.reload();
     }
+    // last, since moving the form clears the status line; a newer post on its way keeps it
+    if (!composer.sending) setStatus('已送出');
   }
 
   // an unsent draft keeps the thread (or the new thread) it was written for, until it is sent, emptied, or
-  // pointed elsewhere by hand (回覆, No.); opening or closing another thread does not move it
+  // pointed elsewhere by hand (回覆, No., ✎ 發新串); opening or closing another thread does not move it
   function hasDraft() {
-    return !!(document.getElementById('fcom')?.value.trim() || document.getElementById('fsub')?.value.trim() || document.getElementById('fupfile')?.files?.length);
+    return composer.touched && !!(document.getElementById('fcom')?.value.trim() || document.getElementById('fsub')?.value.trim() || document.getElementById('fupfile')?.files?.length);
   }
 
   function setLabel() {
@@ -1117,7 +1142,7 @@ html.kr-portal .kr-side { border-right: 0; }
   function composerReply(res) {
     const { form, restoInput } = composer;
     if (!form || !restoInput) return;
-    if (composer.mode !== 'reply' || composer.target !== res) setStatus('');
+    if (!composer.sending && (composer.mode !== 'reply' || composer.target !== res)) setStatus('');
     composer.mode = 'reply';
     composer.target = res;
     restoInput.value = String(res);
@@ -1133,7 +1158,7 @@ html.kr-portal .kr-side { border-right: 0; }
   function composerNew() {
     const { form, restoInput } = composer;
     if (!form || !restoInput) return;
-    if (composer.mode !== 'new') setStatus('');
+    if (!composer.sending && composer.mode !== 'new') setStatus('');
     composer.mode = 'new';
     composer.target = null;
     restoInput.value = '';
@@ -1391,7 +1416,8 @@ html.kr-portal .kr-side { border-right: 0; }
           a.dataset.res = String(link.res);
           if (link.post) a.dataset.post = String(link.post);
           a.removeAttribute('target');
-        } else if (/^https?:/i.test(href)) {
+        } else if (!href.startsWith('#')) {
+          // anything else leaves the board: a new tab, so the list, the thread and a draft stay
           a.target = '_blank';
           a.rel = 'noopener noreferrer nofollow';
         }

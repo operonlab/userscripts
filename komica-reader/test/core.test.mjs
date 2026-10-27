@@ -221,7 +221,7 @@ test('a post is confirmed only by a newer post holding what was sent', () => {
   assert.equal(confirmPosted(posts, { after: 101, probe: '推' }), false); // an older 推 proves nothing
   assert.equal(confirmPosted(posts, { after: 105, probe: '新的一則' }), false); // nothing newer than what was known
   assert.equal(confirmPosted(posts, { after: 0, probe: '推' }), false); // nothing known when sent: no verdict
-  assert.equal(confirmPosted(posts, { after: 101, probe: '' }), true); // an image-only reply: any newer post
+  assert.equal(confirmPosted(posts, { after: 101, probe: '' }), false); // an image alone: someone else's post would pass
 });
 
 test('post links and images may go to the web only, as the browser parses them', () => {
