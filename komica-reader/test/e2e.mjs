@@ -128,7 +128,8 @@ try {
     throw new Error('stop');
   }
   const urlBefore = page.url();
-  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+  // x past the floated 88px thumbnail, so the click lands on the text, not the image
+  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 130, y: 5 } });
   const frameEl = await page.waitForSelector('iframe[name="kr-drawer"]');
   let frame = await frameEl.contentFrame();
   await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 });
@@ -198,9 +199,15 @@ try {
   const left = await page
     .waitForFunction((t) => !document.querySelector('.kr-drawer-title').textContent.includes(`No.${t}`), target, { timeout: 20000 })
     .then(() => true, () => false);
-  await page.locator(`#threads .thread[data-no="${target}"] .threadpost .quote`).click({ position: { x: 3, y: 3 } });
+  // reopen through the OP thumbnail when there is one: in the list it opens the thread instead of expanding the image
+  // the <a class="file-thumb"> has a 0×0 inline box; what a reader hits is its <img>
+  const thumbSel = `#threads .thread[data-no="${target}"] .threadpost .file-thumb img`;
+  const viaThumb = (await page.locator(thumbSel).count()) > 0;
+  await page.locator(viaThumb ? thumbSel : `#threads .thread[data-no="${target}"] .threadpost .quote`).first().click({ position: { x: viaThumb ? 20 : 130, y: viaThumb ? 20 : 5 } });
   const back = await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 }).then(() => true, () => false);
+  const expandedInList = await page.evaluate((t) => !!document.querySelector(`#threads .thread[data-no="${t}"] .threadpost .-expanded`), target);
   check('drawer: after browsing off the thread inside it, opening that thread again reloads it', left && back, JSON.stringify({ left, back, url: frame.url() }));
+  if (viaThumb) check('board: an OP thumbnail opens the thread rather than expanding the image in the row', back && !expandedInList, JSON.stringify({ back, expandedInList }));
   await frame.waitForSelector('#postform_main.kr-composer.kr-reply', { timeout: 20000 }).catch(() => null);
 
   await frame.press('body', 'Escape');
@@ -235,7 +242,8 @@ try {
   const rlink = await page.evaluate(() => document.querySelector('#threads .rlink a')?.getAttribute('href'));
   if (rlink) {
     const res = rlink.match(/res=(\d+)/)[1];
-    await page.click(`#threads .rlink a[href="${rlink}"]`);
+    // the list hides [回應] (the whole card opens the thread); a synthetic click still exercises the link interception
+    await page.evaluate((h) => document.querySelector(`#threads .rlink a[href="${h}"]`).click(), rlink);
     frame = await (await page.waitForSelector('iframe[name="kr-drawer"]')).contentFrame();
     const ok = await frame.waitForURL(new RegExp(`res=${res}`), { timeout: 30000 }).then(() => true, () => false);
     check('board: [回應] opens the thread in the drawer instead of leaving the board', ok && page.url() === urlBefore, `res=${res}`);

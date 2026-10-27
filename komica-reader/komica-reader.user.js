@@ -124,8 +124,19 @@ html.kr #threads .post.reply { border-radius: 10px; padding: 6px 12px; max-width
 html.kr #threads .post-head { line-height: 1.6; }
 html.kr-md #threads .thread { cursor: pointer; }
 html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
-html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
-html.kr-md #threads .threadpost .file-thumb img { max-width: 160px; height: auto; }
+html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  margin: 4px 0 0; font-size: 14px; line-height: 1.6; }
+/* a master row: thumbnail, title line, three lines of text, the reply meta; the rest lives in the detail pane */
+html.kr-md #threads .thread { margin-bottom: 10px; padding: 10px 14px; }
+html.kr-md #threads .threadpost .file-text, html.kr-md #threads .threadpost .post-head input[type="checkbox"],
+html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .post-action-wrap, html.kr-md #threads .threadpost .rlink,
+html.kr-md #threads .threadpost .postvote-slot, html.kr-md #threads .threadpost .category, html.kr-md #threads .threadpost .backquote,
+html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br { display: none !important; }
+html.kr-md #threads .threadpost .file-thumb img { width: 88px !important; height: 88px !important; object-fit: cover; border-radius: 8px; }
+html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 4px 0; }
+html.kr-md #threads .threadpost .post-head { font-size: 12px; opacity: .9; }
+html.kr-md #threads .threadpost .post-head .title { font-size: 15px; margin-right: 6px; }
+html.kr-md #threads .thread .kr-meta { clear: both; margin-top: 6px; }
 html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end { display: none !important; }
 html.kr-md #toplink { font-size: 12px; }
 html.kr-md .kr-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; opacity: .8; }
@@ -532,6 +543,15 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
         // on a thread page the No. quotes into this page's own form (see init)
         if (!composer.resto) onHeadNumber(e, (no, op) => openDrawer(op, { quote: no }));
         if (e.defaultPrevented) return;
+        // an OP thumbnail in the list opens the thread (the pane shows the full image); the site would expand it in the row
+        const thumb = e.target.closest('.threadpost .file-thumb');
+        const thumbRes = Number(thumb?.closest('.thread[data-no]')?.dataset.no);
+        if (thumbRes) {
+          e.preventDefault();
+          e.stopPropagation();
+          openDrawer(thumbRes);
+          return;
+        }
         const a = e.target.closest('a[href]');
         if (a && (!a.target || a.target === '_self')) {
           const link = threadLink(a.getAttribute('href'), location.href);
