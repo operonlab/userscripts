@@ -769,7 +769,10 @@ try {
       const head = replies[0]?.querySelector('.post-head');
       const id = head?.querySelector('.id[data-id]')?.getAttribute('data-id') || /ID:([A-Za-z0-9./]{8})/.exec(head?.textContent || '')?.[1] || '';
       if (id) localStorage.setItem('komica_hidden_ids_v1', JSON.stringify({ enabled: true, entries: [{ id, addedAt: Date.now() }] }));
-      const word = (replies[1]?.querySelector('.quote')?.textContent || '').replace(/\s|>>\d+/g, '').slice(0, 4);
+      // the reply's own words: not its ▲▼ counts, which are all an image-only reply's quote holds
+      const quote = replies[1]?.querySelector('.quote')?.cloneNode(true);
+      quote?.querySelector('.postvote-slot')?.remove();
+      const word = (quote?.textContent || '').replace(/\s|>>\d+/g, '').slice(0, 4);
       if (word.length === 4) localStorage.setItem('komica_keyword_filter', JSON.stringify({ enabled: true, keywords: word, entries: [{ keyword: word, addedAt: Date.now() }] }));
       const last = replies.at(-1)?.getAttribute('data-no') || '';
       if (last) {
@@ -807,9 +810,12 @@ try {
     await vp.waitForTimeout(600);
     const folded = await vp.evaluate((no) => {
       const art = document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`);
-      return { vote: art.dataset.vote, down: art.querySelector('.postvote-dislike-count')?.textContent, textHeight: art.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? 0 };
+      // the answer says the vote is yours (own_vote -1): the site marks that ▼ in its blue
+      const mine = art.querySelector('.postvote-down.has-voted-down');
+      return { vote: art.dataset.vote, down: art.querySelector('.postvote-dislike-count')?.textContent, textHeight: art.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? 0, mine: mine ? getComputedStyle(mine).color : null };
     }, victim);
     check('pane: ▼ goes out through the site\'s own handler, and its answer folds the post', sent.length === 1 && sent[0].startsWith(`no=${victim}&vote=down`) && folded.vote === 'collapsed' && folded.down === '9' && folded.textHeight === 0, JSON.stringify({ sent, ...folded }));
+    check('pane: your own vote shows in the site\'s colour', folded.mine === 'rgb(41, 128, 185)', JSON.stringify({ mine: folded.mine }));
     await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .kr-fold-toggle`).click();
     check('pane: 展開 opens a folded post', await vp.evaluate((no) => document.querySelector(`.kr-pane .kr-post[data-no="${no}"] .kr-post-text`)?.getBoundingClientRect().height > 0, victim));
     await vp.locator('.kr-pane-close').click();
@@ -932,6 +938,70 @@ try {
     await pp.waitForFunction(() => document.querySelector('.kr-pane .kr-vote .postvote-btn:not([data-e2e-seen])'), null, { timeout: 15000 }).catch(() => null);
     const open = await paneVotes();
     check('paused, then reopened: the notice goes and the thread drawn again has working ▲▼', !!gone && open.n > 0 && open.redrawn === open.n && open.disabled === 0, JSON.stringify({ gone: !!gone, ...open }));
+
+    // the site's floating ▲▼ (to the page's top and bottom, not votes) look like the reader's buttons; with a thread
+    // open they scroll the thread, and with none they scroll the page as on the site
+    await pp.locator('.kr-pane-back').click();
+    const longest = await pp.evaluate(() => [...document.querySelectorAll('#threads .thread')]
+      .map((t) => [t.dataset.no, Number(/\d+/.exec(t.querySelector('.kr-meta-count')?.textContent || '')?.[0] || 0)]).sort((a, b) => b[1] - a[1])[0]?.[0]);
+    await pp.locator(`#threads .thread[data-no="${longest}"] .kr-meta-count`).click();
+    await pp.waitForSelector('.kr-pane .kr-post', { timeout: 15000 });
+    await pp.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => {});
+    const scroll = () => pp.evaluate(() => {
+      const b = document.querySelector('.kr-pane-body');
+      return { top: Math.round(b.scrollTop), atEnd: b.scrollTop + b.clientHeight >= b.scrollHeight - 2, room: b.scrollHeight - b.clientHeight, docY: Math.round(scrollY) };
+    });
+    // measured on a short screen (a phone on its side), where the site's top: 80% would put them under the reply form
+    await pp.setViewportSize({ width: 393, height: 420 });
+    await pp.waitForTimeout(300);
+    const look = await pp.evaluate(() => {
+      const box = document.querySelector('.kr-site-scroll');
+      const links = [...(box?.querySelectorAll('a') || [])];
+      const free = (a) => { const r = a.getBoundingClientRect(); return a.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); };
+      const a = links[0];
+      return box && { opacity: getComputedStyle(box).opacity, radius: parseFloat(getComputedStyle(a).borderRadius), color: getComputedStyle(a).color, w: Math.round(a.getBoundingClientRect().width), free: links.map(free) };
+    });
+    await pp.setViewportSize({ width: 393, height: 852 });
+    check('site ▲▼ to top/bottom: round grey buttons, not like the votes, clear of the reply form', !!look && look.opacity === '1' && look.radius > 10 && look.color === 'rgb(110, 110, 115)' && look.w >= 30 && look.free.length === 2 && look.free.every(Boolean), JSON.stringify(look));
+    await pp.evaluate(() => { const b = document.querySelector('.kr-pane-body'); b.scrollTop = b.scrollHeight / 2; });
+    const mid = await scroll();
+    await pp.locator('.kr-site-scroll a[href*="scrollIntoView"]').click();
+    await pp.waitForTimeout(400);
+    const down = await scroll();
+    await pp.locator('.kr-site-scroll a[href="#"]').click();
+    await pp.waitForTimeout(400);
+    const upTop = await scroll();
+    // (to its end as it was when tapped: images loading there may lengthen it after)
+    check('site ▲▼ on a phone with a thread open: ▼ takes the thread to its end, ▲ to its start, the page behind stays put', mid.room > 200 && mid.top > 0 && down.top >= mid.room - 2 && upTop.top === 0 && down.docY === mid.docY && upTop.docY === mid.docY, JSON.stringify({ mid, down, upTop }));
+    await pp.locator('.kr-pane-back').click();
+    await pp.evaluate(() => scrollTo(0, 1500));
+    await pp.waitForTimeout(200);
+    const before = await pp.evaluate(() => Math.round(scrollY));
+    await pp.locator('.kr-site-scroll a[href*="scrollIntoView"]').click();
+    await pp.waitForTimeout(400);
+    const bottom = await pp.evaluate(() => Math.round(scrollY));
+    await pp.locator('.kr-site-scroll a[href="#"]').click();
+    await pp.waitForTimeout(400);
+    check('site ▲▼ with no thread open: the page goes to its end and back to its top, as on the site', before > 0 && bottom > before && await pp.evaluate(() => scrollY) === 0, JSON.stringify({ before, bottom }));
+    // on a wide screen the pane sits beside the list and the ▲▼ at the list's edge: they keep scrolling the list
+    await pp.setViewportSize({ width: 1440, height: 900 });
+    await pp.locator(`#threads .thread[data-no="${longest}"] .kr-meta-count`).click();
+    await pp.waitForSelector('.kr-pane .kr-post', { timeout: 15000 });
+    await pp.waitForTimeout(800);
+    await pp.evaluate(() => { document.querySelector('.kr-pane-body').scrollTop = 600; scrollTo(0, 800); });
+    await pp.waitForTimeout(200);
+    const wideBefore = await scroll();
+    await pp.locator('.kr-site-scroll a[href="#"]').click();
+    await pp.waitForTimeout(400);
+    const wideAfter = await scroll();
+    const edge = await pp.evaluate(() => ({ right: Math.round(document.querySelector('.kr-site-scroll').getBoundingClientRect().right), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) }));
+    check('site ▲ on a wide screen with a thread open: at the list\'s edge, it takes the list to its top and leaves the thread', wideBefore.docY > 0 && wideBefore.top > 0 && wideAfter.docY === 0 && wideAfter.top === wideBefore.top && edge.right <= edge.paneLeft, JSON.stringify({ wideBefore, wideAfter, edge }));
+    await pp.locator('.kr-pane-close').click();
+    await pp.evaluate(() => scrollTo(0, 800));
+    await pp.waitForTimeout(200);
+    await pp.locator('.kr-site-scroll a[href="#"]').click();
+    await pp.waitForTimeout(400);
+    check('site ▲ on a wide screen with no thread open: the page goes to its top', await pp.evaluate(() => scrollY) === 0);
   } else {
     check('paused: the board loaded with the site\'s notice and a row with ▲▼', false, JSON.stringify({ banner: !!banner, statusHits }));
   }

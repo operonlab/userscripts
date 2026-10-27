@@ -3,6 +3,11 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.2 — 2026-10-27
+
+- **Your own vote shows.** The site marks the ▲ or ▼ you gave red or blue; the reader had greyed that out, so a post you had already voted on looked untouched, and tapping it again (which changed nothing when tried on the live site) looked like a failed vote.
+- **The site's floating ▲▼ at the right edge** (to the top and bottom of the page, not votes) are round grey buttons now, unlike the votes. On a phone with a thread open they scrolled the list hidden behind it, so they seemed to do nothing; there they now take the thread to its start or end. Elsewhere they scroll the page as on the site, and beside a thread on a wider screen they keep to the list's edge, as before.
+
 ## 0.6.1 — 2026-10-27
 
 - **When the site pauses voting, the reader shows it.** The site then turns every ▲▼ off and puts up 系統忙碌，投票功能暫停，請稍後再試。 The reader had set that notice in small grey type, under the reply form on a phone with a thread open, and drew the turned-off ▲▼ like working ones, so a tap did nothing and nothing said why. The notice now keeps the site's warning colours and, on a phone with a thread open, sits above the folded reply form (the form, opened, still covers it); the turned-off ▲▼ are dimmed, and the pane's ▲▼ are off from the start as the site's are. When the site reopens voting, all of them work again.

@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.1
+// @version      0.6.2
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -492,11 +492,12 @@ html.kr {
   --kr-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
   --kr-sel: color-mix(in srgb, var(--kr-accent) 13%, var(--kr-card));
   --kr-id1: #0a6fd6; --kr-id2: #b85c00; --kr-id3: #c4312a;
-  --kr-warn-bg: #fff0c7; --kr-warn-text: #6d3700;
+  --kr-warn-bg: #fff0c7; --kr-warn-text: #6d3700; --kr-voted-up: #c0392b; --kr-voted-down: #2980b9;
 }
 html.kr[data-kr-dark] {
   --kr-text: #f5f5f7; --kr-text2: #a1a1a6; --kr-text3: #6e6e73;
   --kr-id1: #5aa9ff; --kr-id2: #ffa94d; --kr-id3: #ff7b72; --kr-warn-bg: #4a3613; --kr-warn-text: #ffd98a;
+  --kr-voted-up: #ff6b5e; --kr-voted-down: #5dade2;
   --kr-bg: #1e1e20; --kr-list-bg: #141416; --kr-card: #232326; --kr-fill: rgba(120, 120, 128, .24); --kr-fill2: rgba(120, 120, 128, .36);
   --kr-sep: rgba(255, 255, 255, .1); --kr-glass: rgba(38, 38, 41, .8); --kr-bar: rgba(30, 30, 32, .86); --kr-shadow: 0 10px 34px rgba(0, 0, 0, .5);
   color-scheme: dark;
@@ -605,7 +606,16 @@ html.kr .kr-site-ctx [hidden] { display: none !important; }
 html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
 html.kr .postvote-up-wrap { border-right-color: var(--kr-sep); }
 html.kr .postvote-btn { color: inherit; }
+/* the site marks your own vote red or blue; the rule above would grey it out */
+html.kr .postvote-btn.has-voted-up { color: var(--kr-voted-up); }
+html.kr .postvote-btn.has-voted-down { color: var(--kr-voted-down); }
 html.kr .postvote-btn:disabled { opacity: .35; cursor: not-allowed; }
+/* the site's ▲▼ to the page's top and bottom (not votes): round grey buttons */
+html.kr .kr-site-scroll { opacity: 1 !important; }
+html.kr .kr-site-scroll table { border-spacing: 0; }
+html.kr .kr-site-scroll td { height: 6px; padding: 0; font-size: 0; line-height: 0; }
+html.kr .kr-site-scroll a { display: block; width: 34px; height: 34px; border-radius: 999px; background: var(--kr-glass); backdrop-filter: blur(20px);
+  box-shadow: var(--kr-shadow); color: var(--kr-text2) !important; font: 13px/34px var(--kr-font); text-align: center; text-decoration: none; }
 /* the site's pager and footer under the list: the same links and text, set as pills and a quiet line; the [ ] around
    the pager's links are typography, sized away rather than removed */
 html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
@@ -828,6 +838,7 @@ html.kr-portal .kr-side { border-right: 0; }
   html.kr-md .kr-composer.kr-new { right: 16px; }
   html.kr-md .kr-composer.kr-reply-pane { left: 12px; right: 12px; width: auto; }
   html.kr.kr-pane-open #gaia-vote-pause-notice { bottom: 76px !important; }
+  html.kr.kr-pane-open .kr-site-scroll { top: auto !important; bottom: 76px !important; }
   html.kr-md #threads .thread.kr-peek .post.reply { margin-left: 0; }
 }
 `;
@@ -2324,18 +2335,6 @@ html.kr-portal .kr-side { border-right: 0; }
       }).observe(threads, { childList: true, subtree: true });
     }
 
-    // the site's ▲▼ scroll buttons are a bare fixed div (inside a <center>) at the window's right edge, now under the pane:
-    // give them the list's edge
-    const tagScroll = () => {
-      for (const n of document.querySelectorAll('div[style*="position: fixed"]:not([class])')) {
-        if (/^▲\s*▼$/.test(n.textContent.trim())) n.classList.add('kr-site-scroll');
-      }
-    };
-    window.addEventListener('load', () => {
-      tagScroll();
-      setTimeout(tagScroll, 1500);
-    }, { once: true });
-
     // a row the pointer rests on is probably next: start its fetch
     let hoverTimer = null;
     threads?.addEventListener('mouseover', (e) => {
@@ -2410,6 +2409,23 @@ html.kr-portal .kr-side { border-right: 0; }
     }
   }
 
+  // the site's ▲▼ scroll buttons (綜合) are a bare fixed div (inside a <center>) at the window's right edge, under an open
+  // pane: on a board they get the list's edge. Where the pane covers the list (a phone) they sit over the thread, and move
+  // it instead.
+  function tagSiteScroll() {
+    for (const n of document.querySelectorAll('div[style*="position: fixed"]:not([class])')) {
+      if (!/^▲\s*▼$/.test(n.textContent.trim())) continue;
+      n.classList.add('kr-site-scroll');
+      n.addEventListener('click', (e) => {
+        const a = e.target.closest('a');
+        const p = state.pane;
+        if (!a || !p || !root.classList.contains('kr-pane-open') || a.getBoundingClientRect().left < p.el.getBoundingClientRect().left) return;
+        e.preventDefault();
+        p.body.scrollTo({ top: a.getAttribute('href') === '#' ? 0 : p.body.scrollHeight });
+      });
+    }
+  }
+
   function init() {
     if (root.classList.contains('kr-portal')) {
       root.toggleAttribute('data-kr-dark', window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2428,6 +2444,10 @@ html.kr-portal .kr-side { border-right: 0; }
     } else if (document.getElementById('threads')) {
       initBoard();
     }
+    window.addEventListener('load', () => {
+      tagSiteScroll();
+      setTimeout(tagSiteScroll, 1500);
+    }, { once: true });
   }
 
   function start() {
