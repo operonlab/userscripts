@@ -544,13 +544,13 @@ html.kr-md #threads .thread.kr-selected { background: var(--kr-sel) !important; 
 html.kr-md #threads .post { background: none !important; color: var(--kr-text) !important; border: 0 !important; }
 html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
 html.kr-md #threads .threadpost .file-text, html.kr-md #threads .threadpost .post-head input[type="checkbox"],
-html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .post-action-wrap, html.kr-md #threads .threadpost .rlink,
+html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .rlink,
 html.kr-md #threads .threadpost .backquote,
 html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br, html.kr-md #threads .threadpost .pugid-edit-slot { display: none !important; }
 html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 2px 0; }
 html.kr-md #threads .threadpost .file-thumb img { width: 72px !important; height: 72px !important; object-fit: cover; border-radius: 9px; }
 html.kr-md #threads .thread { position: relative; }
-html.kr-md #threads .threadpost .post-head > :not(.title), html.kr-md #threads .threadpost .post-head .kr-untitled,
+html.kr-md #threads .threadpost .post-head > :not(.title, .post-action-wrap), html.kr-md #threads .threadpost .post-head .kr-untitled,
 html.kr-md #threads .threadpost .quote .text-button { display: none !important; }
 html.kr-md #threads .threadpost .post-head .title { display: block; margin: 0 56px 2px 0; color: var(--kr-text) !important; font: 600 15px/1.35 var(--kr-font); }
 html.kr-md .kr-when { position: absolute; top: 13px; right: 14px; font-size: 12px; color: var(--kr-text3); }
@@ -589,7 +589,12 @@ html.kr-md #threads .threadpost .category a:is(.tagproposal-open, [target="_blan
   font: 11px var(--kr-font); text-decoration: none; }
 html.kr .kr-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
 /* the site's ▲▼ on a row: out of the clamped text, on the row's meta line (the site's own buttons and handler) */
-html.kr-md #threads .threadpost .quote .postvote-slot { position: absolute; right: 14px; bottom: 10px; margin: 0; }
+html.kr-md #threads .threadpost .quote .postvote-slot { position: absolute; right: 44px; bottom: 10px; margin: 0; }
+/* the site's ▾ (檢舉、隱藏、加入圖書館／映畫館…) at the row's corner and in each post's head: the site's own button and menu */
+html.kr-md #threads .threadpost .post-head > .post-action-wrap { position: absolute; right: 12px; bottom: 9px; margin: 0; }
+html.kr .post-menu-toggle { width: 26px; height: 22px; padding: 0; border: 0 !important; border-radius: 999px; background: var(--kr-fill) !important; color: var(--kr-text2) !important;
+  font: 14px/22px var(--kr-font); text-align: center; cursor: pointer; }
+html.kr .post-menu-toggle:hover, html.kr .post-menu-toggle[aria-expanded="true"] { background: var(--kr-fill2) !important; color: var(--kr-text) !important; }
 html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
 html.kr .postvote-up-wrap { border-right-color: var(--kr-sep); }
 html.kr .postvote-btn { color: inherit; }
@@ -1429,6 +1434,7 @@ html.kr-portal .kr-side { border-right: 0; }
       const src = holder?.getAttribute('data-image-original') || fileLink?.getAttribute('href') || '';
       const info = (post.querySelector('.file-text')?.textContent || '').replace(/^\s*檔名[:：]\s*/, '').trim();
       const propose = post.querySelector('.category a.tagproposal-open')?.getAttribute('data-no') || '';
+      const report = post.querySelector('.post-menu-toggle[data-report-url]')?.getAttribute('data-report-url') || '';
       return {
         no: Number(post.getAttribute('data-no')),
         op: post.classList.contains('threadpost'),
@@ -1451,6 +1457,7 @@ html.kr-portal .kr-side { border-right: 0; }
         vote: readVote(post),
         tags: readTags(post),
         propose: /^\d+$/.test(propose) ? propose : null,
+        menu: /^pixmicat\.php\?mode=module&load=mod_report&action=report&res=\d+$/.test(report) ? report : null,
       };
     });
   }
@@ -1682,6 +1689,8 @@ html.kr-portal .kr-side { border-right: 0; }
       if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
       if (p.id) head.append(el('span', { class: 'kr-post-id' }, `ID:${p.id}`));
       head.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
+      // the site's ▾: its own script picks up any such button and opens its menu on it
+      if (p.menu) head.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
       art.append(head);
       if (p.id) art.dataset.id = p.id;
       if (p.vote) {
@@ -1880,6 +1889,8 @@ html.kr-portal .kr-side { border-right: 0; }
       setTimeout(filterPane);
     });
     window.addEventListener('storage', () => filterPane());
+    // the site's own menus hide a post or an ID in this tab (and its toast undoes it): the pane follows at once
+    document.addEventListener('click', (e) => e.target.closest?.('.post-action-menu, #post-id-actions, .post-id-toast') && setTimeout(filterPane));
 
     close.addEventListener('click', closePane);
     back.addEventListener('click', closePane);

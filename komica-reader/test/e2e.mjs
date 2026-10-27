@@ -569,6 +569,19 @@ try {
   // post_vote.php is answered or aborted here, and vote_status says voting is open so the site's handler sends at all.
   const vctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW', colorScheme: 'light' });
   await vctx.addInitScript(wrapped);
+  // and nothing else leaves either: any other POST to the board, and any report page, is stopped and counted. The
+  // site's own edit_links query on load (which posts this visitor may still edit) is the one POST let through.
+  // Registered first, so the vote routes below take precedence over it.
+  const stopped = [];
+  await vctx.route(/gaia\.komica1\.org\/00b\//, (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && /^mode=edit_links&/.test(q.postData() || '')) return r.continue();
+    if (q.method() !== 'GET' || /mod_report/.test(q.url())) {
+      stopped.push(`${q.method()} ${q.url()}`);
+      return r.abort();
+    }
+    return r.continue();
+  });
   const sent = [];
   await vctx.route(/vote_status\.json/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"paused":false}' }));
   await vctx.route(/post_vote\.php/, (r) => {
@@ -618,6 +631,37 @@ try {
     const opened = await shown('.kr-composer #postinfo .post-notices');
     check('form: the site\'s notices fold behind one line and open on it; its 發文說明與注意事項 shows', form.toggle && !form.notices && form.rules && opened, JSON.stringify({ ...form, opened }));
     await vp.locator('.kr-composer-close').click();
+    // the site's ▾: on a row it opens the site's menu, not the thread; in the pane every post has one, and its
+    // 隱藏此留言 (stored by the site, nothing sent) hides that reply in the pane at once
+    const mres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 2 && t.querySelector('.threadpost .post-menu-toggle'))?.dataset.no);
+    if (mres) {
+      await vp.locator(`#threads .thread[data-no="${mres}"] .threadpost .post-menu-toggle`).click();
+      await vp.waitForTimeout(300);
+      const rowMenu = await vp.evaluate(() => ({ menu: document.querySelector('.post-action-menu')?.hidden === false, pane: document.documentElement.classList.contains('kr-pane-open') }));
+      check('rows: the site\'s ▾ opens its menu, not the thread', rowMenu.menu && !rowMenu.pane, JSON.stringify(rowMenu));
+      await vp.keyboard.press('Escape');
+      await vp.locator(`#threads .thread[data-no="${mres}"] .kr-meta-count`).click();
+      await vp.waitForSelector('.kr-pane .kr-post', { timeout: 10000 });
+      await vp.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => {});
+      const mine = await vp.evaluate(() => {
+        const posts = [...document.querySelectorAll('.kr-pane .kr-post')];
+        const no = posts.filter((p) => !p.classList.contains('kr-post-op') && p.getBoundingClientRect().height > 0)[0]?.dataset.no;
+        // the site shuts its menu on any scroll: bring the post into view first
+        document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`)?.scrollIntoView({ block: 'center' });
+        return { posts: posts.length, withMenu: posts.filter((p) => p.querySelector('.kr-post-head .post-menu-toggle[data-no][data-report-url]')).length, no };
+      });
+      await vp.waitForTimeout(1200);
+      await vp.locator(`.kr-pane .kr-post[data-no="${mine.no}"] .post-menu-toggle`).click();
+      await vp.waitForTimeout(200);
+      const label = await vp.evaluate(() => document.querySelector('.post-action-menu:not([hidden]) .post-action-hide')?.textContent || '');
+      if (label) await vp.locator('.post-action-menu:not([hidden]) .post-action-hide').click();
+      await vp.waitForTimeout(400);
+      const hid = await vp.evaluate((no) => ({ stored: JSON.parse(localStorage.getItem('komica_hidden_posts_v1') || '{}')[no]?.hidden === true, inPane: !!document.querySelector(`.kr-pane .kr-post[data-no="${no}"].kr-hidden`) }), mine.no);
+      check('pane: every post has the site\'s ▾; its 隱藏此留言 hides that reply in the pane at once', mine.posts > 0 && mine.withMenu === mine.posts && /隱藏此留言/.test(label) && hid.stored && hid.inPane, JSON.stringify({ ...mine, label, ...hid }));
+      // undo through the site's toast, so the checks after this one start from the reader's own settings
+      await vp.locator('.post-id-toast button').click().catch(() => null);
+      await vp.locator('.kr-pane-close').click();
+    }
     const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
     // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
     // the second reply, and the last reply on the 隱藏貼文清單
@@ -706,6 +750,7 @@ try {
       };
     });
     check('board: pager links are pills; the footer links, credits, notice and counter are all still there', foot.pills && foot.bottom === 4 && foot.credits && foot.notice && foot.flag, JSON.stringify(foot));
+    check('nothing but the mocked votes was sent to the site', stopped.length === 0, JSON.stringify(stopped));
   } else {
     check('votes: the board loaded in a fresh context', false);
   }
