@@ -3,6 +3,14 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.5.2 — 2026-10-27
+
+- **▲▼ are back**, on the list rows and under every post in the pane. They are the site's own: its handler sends the vote and the counts follow its answer. The site's setting that hides them hides them here too.
+- **A low-rated post folds in the pane as it does on the site**, with 展開; one held for review shows the site's notice instead of its text. The pane used to show both the fold notice and the whole post.
+- **Your own 隱藏設定 on the site apply in the pane**: replies from a hidden ID, with a hidden keyword, or on your 隱藏貼文清單 are kept out of sight, with a line saying how many and 暫時顯示. Jumping to one by its number shows them.
+- **Videos in the pane take their own size** as soon as the file says what it is. They stayed the size of their thumbnail until played.
+- The pager and the footer under the list are set as pills and a quiet line. Everything in them stays: the links, the credits, the notice and the visitor counter.
+
 ## 0.5.1 — 2026-10-27
 
 - **Videos and thumbnails on GIF裡** (and the other boards on `cat.2nyan.org`). One post there links its file wrongly, and while it was on the page every thumbnail and video on the board went to an address that does not exist. Links like it are now set aside.

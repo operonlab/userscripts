@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.5.1
+// @version      0.5.2
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -545,7 +545,7 @@ html.kr-md #threads .post { background: none !important; color: var(--kr-text) !
 html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
 html.kr-md #threads .threadpost .file-text, html.kr-md #threads .threadpost .post-head input[type="checkbox"],
 html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .post-action-wrap, html.kr-md #threads .threadpost .rlink,
-html.kr-md #threads .threadpost .postvote-slot, html.kr-md #threads .threadpost .category, html.kr-md #threads .threadpost .backquote,
+html.kr-md #threads .threadpost .category, html.kr-md #threads .threadpost .backquote,
 html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br, html.kr-md #threads .threadpost .pugid-edit-slot { display: none !important; }
 html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 2px 0; }
 html.kr-md #threads .threadpost .file-thumb img { width: 72px !important; height: 72px !important; object-fit: cover; border-radius: 9px; }
@@ -580,8 +580,29 @@ html.kr-md #scroller { position: static !important; width: auto !important; heig
 html.kr-md #navi { display: none !important; }
 html.kr-md .kr-meta { clear: both; display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
 html.kr-md .kr-meta button { border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
+/* the site's ▲▼ on a row: out of the clamped text, on the row's meta line (the site's own buttons and handler) */
+html.kr-md #threads .threadpost .quote .postvote-slot { position: absolute; right: 14px; bottom: 10px; margin: 0; }
+html.kr .postvote-panel { gap: 2px; padding: 1px 4px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2); font: 12px/1 var(--kr-font); }
+html.kr .postvote-up-wrap { border-right-color: var(--kr-sep); }
+html.kr .postvote-btn { color: inherit; }
+/* the site's pager and footer under the list: the same links and text, set as pills and a quiet line; the [ ] around
+   the pager's links are typography, sized away rather than removed */
 html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
-html.kr-md #page_switch a { display: inline-block; margin: 2px; padding: 4px 10px; border-radius: 999px; background: var(--kr-fill); text-decoration: none; }
+html.kr-md #page_switch table { margin: 0 auto; border: 0 !important; }
+html.kr-md #page_switch td { padding: 0 2px; font-size: 0; white-space: normal !important; }
+/* a cell that is only words (第一頁, 最後一頁) keeps them */
+html.kr-md #page_switch td:not(:has(a, b, form)) { font: 13px var(--kr-font); color: var(--kr-text3); }
+html.kr-md #page_switch :is(a, b, input[type="submit"]) { display: inline-block; min-width: 30px; box-sizing: border-box; margin: 2px; padding: 5px 10px;
+  border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text) !important; font: 500 13px/1.2 var(--kr-font); text-align: center; text-decoration: none; cursor: pointer; }
+html.kr-md #page_switch :is(a, input[type="submit"]):hover { background: var(--kr-fill2); }
+html.kr-md #page_switch b { background: var(--kr-accent); color: #fff !important; }
+html.kr-md #footer { max-width: 980px; margin: 8px auto 0; text-align: center; font: 11px/1.6 var(--kr-font); color: var(--kr-text3) !important; }
+html.kr-md #bottomlink { margin-bottom: 10px; font-size: 0; }
+html.kr-md #bottomlink a { display: inline-flex; align-items: center; margin: 2px 4px; padding: 5px 14px; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text2) !important;
+  font: 12px var(--kr-font); text-decoration: none; }
+html.kr-md #bottomlink a:hover { background: var(--kr-fill2); }
+html.kr-md #footer :is(small, small a, #web-ad) { font-size: 11px !important; color: var(--kr-text3) !important; }
+html.kr-md img[src*="flagcounter"] { margin-top: 8px; border-radius: 6px; opacity: .55; }
 
 /* the site's own form, floating; never moved, never display:none (Turnstile lives in it) */
 html.kr .kr-composer { position: fixed; z-index: 9001; right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
@@ -674,6 +695,22 @@ html.kr .kr-spoiler-btn { position: absolute; inset: 0; width: 100%; border: 0; 
 html.kr .kr-post-media:not(.kr-spoiler) .kr-spoiler-btn { display: none; }
 html.kr .kr-backlinks { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
 html.kr .kr-backlinks a { color: var(--kr-accent); text-decoration: none; }
+/* ▲▼ in the pane carry the site's own classes, so its handler sends the vote; a low-rated post folds as on the site */
+html.kr .kr-vote { display: flex; margin-top: 8px; }
+html.kr .kr-vote .postvote-btn { padding: 4px 8px; }
+html.kr .kr-vote:has(> [hidden]) { display: none; }
+html.kr .kr-fold { display: none; margin: 2px 0 6px; font-size: 13px; color: var(--kr-text2); }
+html.kr .kr-fold button { margin-left: 6px; padding: 2px 9px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-accent); font: inherit; cursor: pointer; }
+html.kr .kr-post:is([data-vote="collapsed"], [data-vote="review"]) { padding-left: 10px; box-shadow: inset 3px 0 var(--kr-text3); }
+html.kr .kr-post:is([data-vote="collapsed"], [data-vote="review"]) > .kr-fold { display: block; }
+html.kr .kr-post[data-vote="collapsed"]:not(.kr-open) > :is(.kr-post-media, .kr-post-text), html.kr .kr-post[data-vote="review"] > :is(.kr-post-media, .kr-post-text),
+html.kr .kr-post[data-vote="review"] .kr-fold button { display: none; }
+/* replies the reader's own 隱藏設定 on the site hides: NGID, keywords, posts hidden after a ▼ */
+html.kr .kr-pane:not(.kr-reveal) .kr-post.kr-hidden { display: none; }
+html.kr .kr-post.kr-hidden { opacity: .6; }
+html.kr .kr-post.kr-hidden::before { content: '依你的隱藏設定（' attr(data-why) '）'; display: block; margin-bottom: 4px; font-size: 11px; color: var(--kr-text3); }
+html.kr .kr-filtered { margin: 8px 0; padding: 8px 12px; border-radius: 10px; background: var(--kr-fill); font-size: 13px; color: var(--kr-text2); }
+html.kr .kr-filtered button { margin-left: 6px; border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
 html.kr .kr-loading, html.kr .kr-pane-error { padding: 18px 0; font-size: 13px; color: var(--kr-text2); }
 html.kr .kr-pane-error { color: #ff453a; }
 html.kr .kr-pane-error .kr-btn { margin: 10px 8px 0 0; }
@@ -1384,8 +1421,125 @@ html.kr-portal .kr-side { border-right: 0; }
             }
           : null,
         quote: post.querySelector('.quote'),
+        vote: readVote(post),
       };
     });
+  }
+
+  // gaia's ▲▼: the counts and the fold state as the page has them. The pane draws the slot again with the site's own
+  // classes and number, and the site's click handler on document sends the vote and rewrites them.
+  const VOTE_STATES = new Set(['normal', 'collapsed', 'review']);
+  function readVote(post) {
+    const slot = post.querySelector('.postvote-slot[data-no]');
+    // held for review on the live page, the site has put its notice in place of the text, slot and all
+    if (!slot) return post.classList.contains('postvote-review') ? { no: null, state: 'review' } : null;
+    if (!/^\d+$/.test(slot.getAttribute('data-no'))) return null;
+    const count = (attr, sel) => String(Math.max(0, Number(slot.getAttribute(attr) ?? slot.querySelector(sel)?.textContent) || 0));
+    const state = slot.getAttribute('data-state') || (post.classList.contains('postvote-collapsed') ? 'collapsed' : 'normal');
+    return {
+      no: slot.getAttribute('data-no'),
+      up: count('data-up', '.postvote-like-count'),
+      down: count('data-down', '.postvote-dislike-count'),
+      state: VOTE_STATES.has(state) ? state : 'normal',
+      mine: slot.querySelector('.has-voted-up') ? 1 : slot.querySelector('.has-voted-down') ? -1 : 0,
+    };
+  }
+
+  function voteSlot(v) {
+    const slot = el('span', { class: 'postvote-slot', 'data-no': v.no, 'data-state': v.state, 'data-up': v.up, 'data-down': v.down });
+    const panel = el('span', { class: 'postvote-panel', 'aria-label': '留言評價' });
+    const side = (dir, label, mark, count, mine) => {
+      const wrap = el('span', { class: `postvote-${dir}-wrap` });
+      wrap.append(
+        el('button', { type: 'button', class: `postvote-btn postvote-${dir}${mine ? ` has-voted-${dir}` : ''}`, title: label, 'aria-label': label }, mark),
+        el('span', { class: dir === 'up' ? 'postvote-like-count' : 'postvote-dislike-count' }, count),
+      );
+      return wrap;
+    };
+    panel.append(side('up', '按讚', '▲', v.up, v.mine === 1), side('down', '倒讚', '▼', v.down, v.mine === -1));
+    slot.append(panel, el('span', { class: 'postvote-state' }));
+    // the site's 一般設定 can hide the ▲▼ (its filter pass only reaches what is on the page when it runs)
+    try {
+      if (localStorage.getItem('hidePostVoteState') === 'true') slot.hidden = true;
+    } catch {
+      /* storage blocked: shown */
+    }
+    return slot;
+  }
+
+  // the fold follows the slot's data-state, which the site's handler rewrites after a vote
+  function syncFold(art, state = art.querySelector('.kr-vote .postvote-slot')?.getAttribute('data-state')) {
+    art.dataset.vote = state === 'collapsed' || state === 'review' ? state : 'normal';
+    const label = art.querySelector(':scope > .kr-fold > span');
+    if (label) label.textContent = state === 'review' ? '此留言已因評價異常隱藏，並送交管理員審核。' : '此留言評價較低，已預設折疊。';
+  }
+
+  // the reader's own 隱藏設定 on the site (its settings page keeps them in this origin's storage): IDs, keywords, and
+  // the 隱藏貼文清單 when its setting is on. The site applies them to its board; the pane applies them here, read as
+  // the site reads them (view-settings.js: readIDs, readKeywords, applyFilters).
+  const SITE_ID = /^[A-Za-z0-9./]{8}$/;
+  function siteFilters() {
+    const read = (key) => {
+      try {
+        return JSON.parse(localStorage.getItem(key) || 'null');
+      } catch {
+        return null;
+      }
+    };
+    const ids = read('komica_hidden_ids_v1');
+    const words = read('komica_keyword_filter');
+    const hidden = read('komica_hidden_posts_v1');
+    let afterDown = false;
+    try {
+      afterDown = localStorage.getItem('hideFutureDownvotesState') === 'true';
+    } catch {
+      afterDown = false;
+    }
+    const list = (v) => (Array.isArray(v) ? v : []);
+    return {
+      ids: new Set(ids?.enabled === true ? list(ids.entries).map((e) => e?.id).filter((id) => typeof id === 'string' && SITE_ID.test(id)) : []),
+      words: words?.enabled === true
+        ? (typeof words.keywords === 'string' ? words.keywords.split(',') : list(words.entries).map((e) => (typeof e?.keyword === 'string' ? e.keyword : '')))
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+      posts: afterDown && hidden && typeof hidden === 'object' ? hidden : {},
+    };
+  }
+
+  function filterPane() {
+    const pane = state.pane;
+    if (!pane?.res) return;
+    const f = siteFilters();
+    let n = 0;
+    for (const art of pane.body.querySelectorAll(':scope > .kr-post:not(.kr-post-op)')) {
+      const why = [];
+      if (art.dataset.id && f.ids.has(art.dataset.id)) why.push(`ID：${art.dataset.id}`);
+      const text = `${art.querySelector('.kr-post-head')?.textContent || ''}${art.querySelector('.kr-post-text')?.textContent || ''}`;
+      for (const w of f.words) if (text.includes(w)) why.push(`關鍵字：${w}`);
+      if (f.posts[art.dataset.no]?.hidden === true) why.push('已加入隱藏貼文清單');
+      art.classList.toggle('kr-hidden', why.length > 0);
+      if (why.length) {
+        art.dataset.why = why.join('、');
+        n++;
+      } else delete art.dataset.why;
+    }
+    let bar = pane.body.querySelector('.kr-filtered');
+    if (!n) {
+      bar?.remove();
+      pane.el.classList.remove('kr-reveal');
+      return;
+    }
+    if (!bar) {
+      bar = el('div', { class: 'kr-filtered' });
+      bar.append(el('span'), el('button', { type: 'button', class: 'kr-reveal-btn' }));
+      const op = pane.body.querySelector('.kr-post-op');
+      if (op) op.after(bar);
+      else pane.body.prepend(bar);
+    }
+    const shown = pane.el.classList.contains('kr-reveal');
+    bar.firstChild.textContent = `依你在站上的隱藏設定，${shown ? '這串有' : '藏起了'} ${n} 則回覆`;
+    bar.lastChild.textContent = shown ? '恢復隱藏' : '暫時顯示';
   }
 
   // post text is user content: only the markup a post needs survives the copy. Elements are kept (2cat's 推文 are
@@ -1394,14 +1548,17 @@ html.kr-portal .kr-side { border-right: 0; }
   const KEEP_ATTRS = new Set(['href', 'src', 'alt', 'title', 'class', 'color', 'size', 'face']);
   function cleanQuote(quote) {
     const q = quote.cloneNode(true);
-    for (const n of q.querySelectorAll(`${DROP}, .postvote-slot, .backquote, .-expand-line, .text-button, .kr-meta`)) n.remove();
-    for (const n of q.querySelectorAll('.hide')) n.replaceWith(...n.childNodes);
+    // the ▲▼ and the low-rating fold are drawn by renderPosts from the post's vote, not copied
+    for (const n of q.querySelectorAll(`${DROP}, .postvote-slot, .postvote-notice, .backquote, .-expand-line, .text-button, .kr-meta`)) n.remove();
+    for (const n of q.querySelectorAll('.hide, .postvote-collapsible-body')) n.replaceWith(...n.childNodes);
     for (const n of q.querySelectorAll('*')) {
       if (n.namespaceURI !== 'http://www.w3.org/1999/xhtml') {
         n.remove();
         continue;
       }
       for (const a of [...n.attributes]) if (!KEEP_ATTRS.has(a.name)) n.removeAttribute(a.name);
+      // a post's own classes stay; the reader's are the reader's (a post cannot pose as a post, a fold or a button)
+      if (n.hasAttribute('class')) n.setAttribute('class', n.getAttribute('class').split(/\s+/).filter((c) => c && !c.startsWith('kr-')).join(' '));
       for (const name of ['href', 'src']) if (n.hasAttribute(name) && !webUrl(n.getAttribute(name), location.href)) n.removeAttribute(name);
     }
     while (q.lastChild && (q.lastChild.nodeName === 'BR' || (q.lastChild.nodeType === 3 && !q.lastChild.data.trim()))) q.lastChild.remove();
@@ -1417,6 +1574,13 @@ html.kr-portal .kr-side { border-right: 0; }
       // 2cat's 18禁 boards answer a video link with their own player page, not the file, and a <video> gives up on
       // it as MEDIA_ERR_SRC_NOT_SUPPORTED (4): offer that page instead. A network or decode error is not that.
       node.addEventListener('error', () => node.error?.code === 4 && boardPage(m.src) && node.replaceWith(playerPage(m)), { once: true });
+      // until a frame is decoded the box is the poster's, the thumbnail's size: once the file gives its own, take it
+      node.addEventListener('loadedmetadata', () => {
+        const { videoWidth: w, videoHeight: h } = node;
+        if (!w || !h) return;
+        node.style.width = `min(${w}px, calc(70vh * ${w / h}))`;
+        node.style.aspectRatio = `${w} / ${h}`;
+      }, { once: true });
     } else {
       node = el('img', { src: m.src, alt: '', loading: 'lazy', decoding: 'async' });
       node.dataset.full = m.src;
@@ -1474,6 +1638,12 @@ html.kr-portal .kr-side { border-right: 0; }
       if (p.id) head.append(el('span', { class: 'kr-post-id' }, `ID:${p.id}`));
       head.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
       art.append(head);
+      if (p.id) art.dataset.id = p.id;
+      if (p.vote) {
+        const fold = el('div', { class: 'kr-fold' });
+        fold.append(el('span'), el('button', { type: 'button', class: 'kr-fold-toggle' }, '展開'));
+        art.append(fold);
+      }
       if (p.media) art.append(renderMedia(p.media));
       const text = el('div', { class: 'kr-post-text' });
       if (p.quote) text.append(...cleanQuote(p.quote).childNodes);
@@ -1503,6 +1673,14 @@ html.kr-portal .kr-side { border-right: 0; }
         }
       }
       art.append(text);
+      if (p.vote) {
+        if (p.vote.no) {
+          const bar = el('div', { class: 'kr-vote' });
+          bar.append(voteSlot(p.vote));
+          art.append(bar);
+        }
+        syncFold(art, p.vote.no ? undefined : p.vote.state);
+      }
       return art;
     });
     for (const art of articles) {
@@ -1518,6 +1696,7 @@ html.kr-portal .kr-side { border-right: 0; }
       more.addEventListener('click', () => openThread(res, { all: true }));
       articles[0].after(more);
     }
+    filterPane();
   }
 
   // ---- the detail pane
@@ -1588,7 +1767,7 @@ html.kr-portal .kr-side { border-right: 0; }
     titles.append(title, sub);
     const actions = el('div', { class: 'kr-pane-actions' });
     const reply = el('button', { type: 'button', class: 'kr-btn kr-primary', title: '回覆這串' }, '✎ 回覆');
-    const newtab = el('a', { class: 'kr-btn', target: '_blank', rel: 'noopener', title: '在新分頁開啟（推噓、檢舉、編輯在那裡）' }, '↗');
+    const newtab = el('a', { class: 'kr-btn', target: '_blank', rel: 'noopener', title: '在新分頁開啟（檢舉、編輯在那裡）' }, '↗');
     const reload = el('button', { type: 'button', class: 'kr-btn', title: '重新載入這串' }, '↻');
     actions.append(reply, newtab, reload);
     const close = el('button', { type: 'button', class: 'kr-btn kr-pane-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
@@ -1637,6 +1816,17 @@ html.kr-portal .kr-side { border-right: 0; }
       resize.addEventListener('lostpointercapture', up, { once: true });
     });
 
+    // the site's handler has rewritten the slot by the time it says so. Cached thread pages still hold the counts from
+    // before: dropped, so reopening shows the vote. The filters are read again too (cheap; the site's lists may move with
+    // it), and on a change from the settings page in another tab.
+    document.addEventListener('postvote:vote', (e) => {
+      const no = String(e.detail?.no || '');
+      for (const slot of body.querySelectorAll('.kr-vote .postvote-slot')) if (slot.getAttribute('data-no') === no) syncFold(slot.closest('.kr-post'));
+      threadCache.clear();
+      setTimeout(filterPane);
+    });
+    window.addEventListener('storage', () => filterPane());
+
     close.addEventListener('click', closePane);
     back.addEventListener('click', closePane);
     reload.addEventListener('click', () => p.res && openThread(p.res, { fresh: true }));
@@ -1663,6 +1853,18 @@ html.kr-portal .kr-side { border-right: 0; }
       if (no) {
         composerReply(p.res);
         quoteIntoComposer(Number(no.dataset.no));
+        return;
+      }
+      const fold = e.target.closest('.kr-fold-toggle');
+      if (fold) {
+        const art = fold.closest('.kr-post');
+        art.classList.toggle('kr-open');
+        fold.textContent = art.classList.contains('kr-open') ? '收起' : '展開';
+        return;
+      }
+      if (e.target.closest('.kr-reveal-btn')) {
+        pane.classList.toggle('kr-reveal');
+        filterPane();
         return;
       }
       const spoiler = e.target.closest('.kr-spoiler-btn');
@@ -1734,6 +1936,11 @@ html.kr-portal .kr-side { border-right: 0; }
   function flashPost(no) {
     const post = state.pane?.body.querySelector(`#kr-p${no}`);
     if (!post) return false;
+    // asked for by number: a reply the reader's filters hide is shown, with the others, rather than nothing happening
+    if (post.classList.contains('kr-hidden') && !state.pane.el.classList.contains('kr-reveal')) {
+      state.pane.el.classList.add('kr-reveal');
+      filterPane();
+    }
     post.scrollIntoView({ block: 'center' });
     post.classList.remove('kr-flash');
     void post.offsetWidth;
@@ -1760,6 +1967,7 @@ html.kr-portal .kr-side { border-right: 0; }
     if (switching) {
       p.full = false;
       p.all = false;
+      p.el.classList.remove('kr-reveal');
       p.body.scrollTop = 0;
       // what the board already shows (the OP and its latest replies) goes up at once; the rest follows the fetch
       const card = document.querySelector(`#threads .thread[data-no="${res}"]`);

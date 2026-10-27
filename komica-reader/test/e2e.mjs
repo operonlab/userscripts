@@ -276,7 +276,9 @@ try {
   const keyRes = await page.evaluate(() => document.querySelector('#threads .thread.kr-selected')?.dataset.no);
   const keyOpen = !!keyRes && (await page.waitForFunction((r) => document.querySelector('.kr-pane-sub').textContent.includes(`No.${r}`), keyRes, { timeout: 5000 }).then(() => true, () => false));
   check('list: j selects the next row and the pane follows', keyOpen, `res=${keyRes}`);
-  check('composer: with the box empty, the form replies to the thread that opens', (await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').value)) === keyRes, `res=${keyRes}`);
+  // the row opens 200ms after j; when it is the thread already in the pane, the pane's title matched before that
+  const followed = !!keyRes && (await page.waitForFunction((r) => document.querySelector('#postform_main input[name="resto"]').value === r, keyRes, { timeout: 5000 }).then(() => true, () => false));
+  check('composer: with the box empty, the form replies to the thread that opens', followed, `res=${keyRes}`);
   await page.keyboard.press('Escape');
   check('composer: with the box empty, closing the thread makes the form 發新串 again', await page.evaluate(() => document.querySelector('#postform_main input[name="resto"]').disabled));
 
@@ -562,6 +564,121 @@ try {
     console.log('NOTE  2cat cellphone: no video thread on the first page; the player fallback was not exercised');
   }
   await fresh.close();
+
+  // ▲▼, the low-rating fold and the reader's own hidden IDs, in the pane. No vote reaches the site: every request to
+  // post_vote.php is answered or aborted here, and vote_status says voting is open so the site's handler sends at all.
+  const vctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW', colorScheme: 'light' });
+  await vctx.addInitScript(wrapped);
+  const sent = [];
+  await vctx.route(/vote_status\.json/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"paused":false}' }));
+  await vctx.route(/post_vote\.php/, (r) => {
+    if (r.request().method() !== 'POST') return r.abort();
+    sent.push(r.request().postData() || '');
+    return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, state: 'collapsed', up_count: 2, down_count: 9, own_vote: -1, vote_changed: true }) });
+  });
+  const vp = await vctx.newPage();
+  await vp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  if (await vp.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null)) {
+    await vp.waitForTimeout(1500);
+    const row = await vp.evaluate(() => {
+      const t = [...document.querySelectorAll('#threads .thread')].find((n) => n.querySelector('.threadpost .postvote-slot'));
+      const r = t?.querySelector('.threadpost .postvote-slot')?.getBoundingClientRect();
+      const tr = t?.getBoundingClientRect();
+      return { found: !!r, inside: !!r && r.height > 0 && r.right <= tr.right && r.top >= tr.top && r.bottom <= tr.bottom };
+    });
+    check('rows: the site\'s ▲▼ show on the row', row.found && row.inside, JSON.stringify(row));
+    const vres = await vp.evaluate(() => [...document.querySelectorAll('#threads .thread')].find((t) => t.querySelectorAll('.post.reply').length >= 3)?.dataset.no);
+    // the reader's own settings, stored the way the site's settings page stores them: the first reply's ID, a word from
+    // the second reply, and the last reply on the 隱藏貼文清單
+    const hide = await vp.evaluate((res) => {
+      const replies = [...document.querySelectorAll(`#threads .thread[data-no="${res}"] .post.reply`)];
+      const head = replies[0]?.querySelector('.post-head');
+      const id = head?.querySelector('.id[data-id]')?.getAttribute('data-id') || /ID:([A-Za-z0-9./]{8})/.exec(head?.textContent || '')?.[1] || '';
+      if (id) localStorage.setItem('komica_hidden_ids_v1', JSON.stringify({ enabled: true, entries: [{ id, addedAt: Date.now() }] }));
+      const word = (replies[1]?.querySelector('.quote')?.textContent || '').replace(/\s|>>\d+/g, '').slice(0, 4);
+      if (word.length === 4) localStorage.setItem('komica_keyword_filter', JSON.stringify({ enabled: true, keywords: word, entries: [{ keyword: word, addedAt: Date.now() }] }));
+      const last = replies.at(-1)?.getAttribute('data-no') || '';
+      if (last) {
+        localStorage.setItem('komica_hidden_posts_v1', JSON.stringify({ [last]: { hidden: true, time: Date.now() } }));
+        localStorage.setItem('hideFutureDownvotesState', 'true');
+      }
+      return { id, word: word.length === 4 ? word : '', wordNo: replies[1]?.getAttribute('data-no'), last };
+    }, vres);
+    await vp.locator(`#threads .thread[data-no="${vres}"] .kr-meta-count`).click();
+    await vp.waitForSelector('.kr-pane .kr-post', { timeout: 10000 });
+    await vp.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => {});
+    const vpane = await vp.evaluate((h) => {
+      const posts = [...document.querySelectorAll('.kr-pane .kr-post')];
+      const hidden = posts.filter((p) => p.classList.contains('kr-hidden'));
+      const why = (no) => document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`)?.dataset.why || '';
+      return {
+        posts: posts.length,
+        withVote: posts.filter((p) => p.querySelector('.kr-vote .postvote-slot[data-no]')).length,
+        stray: !!document.querySelector('.kr-pane .kr-post-text :is(.postvote-notice, .postvote-toggle, .postvote-slot)'),
+        hidden: hidden.length,
+        // every hidden reply has a reason that is really true of it, and is out of sight
+        justified: hidden.every((p) => p.getBoundingClientRect().height === 0 && (p.dataset.id === h.id || (h.word && p.textContent.includes(h.word)) || p.dataset.no === h.last)),
+        byId: !h.id || posts.filter((p) => p.dataset.id === h.id && !p.classList.contains('kr-post-op')).every((p) => p.classList.contains('kr-hidden')),
+        byWord: !h.word || why(h.wordNo).includes(`關鍵字：${h.word}`),
+        byList: !h.last || why(h.last).includes('隱藏貼文清單'),
+        bar: document.querySelector('.kr-pane .kr-filtered')?.textContent || '',
+      };
+    }, hide);
+    check('pane: every post has the site\'s ▲▼, none of its fold markup copied into the text', vpane.posts > 0 && vpane.withVote === vpane.posts && !vpane.stray, JSON.stringify(vpane));
+    if (hide.id && hide.word && hide.last) {
+      check('pane: replies the reader hid on the site (ID, keyword, 隱藏貼文清單) are hidden, with a note to show them', vpane.hidden >= 3 && vpane.justified && vpane.byId && vpane.byWord && vpane.byList && /藏起了 \d+ 則回覆/.test(vpane.bar), JSON.stringify({ hide, ...vpane }));
+    } else console.log(`NOTE  the hidden-reply check was not exercised (read ${JSON.stringify(hide)})`);
+    const victim = await vp.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op)')].filter((p) => p.getBoundingClientRect().height > 0).pop()?.dataset.no);
+    await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .postvote-down`).click();
+    await vp.waitForTimeout(600);
+    const folded = await vp.evaluate((no) => {
+      const art = document.querySelector(`.kr-pane .kr-post[data-no="${no}"]`);
+      return { vote: art.dataset.vote, down: art.querySelector('.postvote-dislike-count')?.textContent, textHeight: art.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? 0 };
+    }, victim);
+    check('pane: ▼ goes out through the site\'s own handler, and its answer folds the post', sent.length === 1 && sent[0].startsWith(`no=${victim}&vote=down`) && folded.vote === 'collapsed' && folded.down === '9' && folded.textHeight === 0, JSON.stringify({ sent, ...folded }));
+    await vp.locator(`.kr-pane .kr-post[data-no="${victim}"] .kr-fold-toggle`).click();
+    check('pane: 展開 opens a folded post', await vp.evaluate((no) => document.querySelector(`.kr-pane .kr-post[data-no="${no}"] .kr-post-text`)?.getBoundingClientRect().height > 0, victim));
+    await vp.locator('.kr-pane-close').click();
+    // a post held for review: on the live page the site has swapped its text, slot and all, for its notice (postvote.js
+    // applyState). The pane's first draw, from that row, shows the notice; the thread page is held back meanwhile.
+    const held = await vp.evaluate((skip) => {
+      const t = [...document.querySelectorAll('#threads .thread')].find((n) => n.dataset.no !== skip && n.querySelector('.threadpost .quote'));
+      const post = t.querySelector('.threadpost');
+      post.classList.add('postvote-review');
+      post.querySelector('.quote').innerHTML = '<span class="postvote-notice">此留言已因評價異常隱藏，並送交管理員審核。</span>';
+      return t.dataset.no;
+    }, vres);
+    const hold = new RegExp(`pixmicat\\.php\\?res=${held}(?!\\d)`);
+    await vp.route(hold, async (r) => {
+      await new Promise((ok) => setTimeout(ok, 5000));
+      await r.continue().catch(() => {});
+    });
+    await vp.locator(`#threads .thread[data-no="${held}"] .kr-meta-count`).click();
+    await vp.waitForSelector('.kr-pane .kr-post-op', { timeout: 3000 }).catch(() => null);
+    const review = await vp.evaluate(() => {
+      const op = document.querySelector('.kr-pane .kr-post-op');
+      return { vote: op?.dataset.vote, fold: op?.querySelector('.kr-fold')?.textContent || '', foldShown: (op?.querySelector('.kr-fold')?.getBoundingClientRect().height || 0) > 0, text: op?.querySelector('.kr-post-text')?.getBoundingClientRect().height ?? -1 };
+    });
+    check('pane: a post held for review shows the site\'s notice, not a blank', review.vote === 'review' && review.foldShown && review.fold.includes('送交管理員審核') && review.text === 0, JSON.stringify(review));
+    await vp.unroute(hold);
+    await vp.locator('.kr-pane-close').click();
+    // the pager and the footer are restyled, nothing in them removed
+    const foot = await vp.evaluate(() => {
+      const visible = (n) => !!n && getComputedStyle(n).display !== 'none' && n.getBoundingClientRect().height > 0;
+      const links = [...document.querySelectorAll('#page_switch a, #page_switch b')];
+      return {
+        pills: links.length > 0 && links.every((a) => parseFloat(getComputedStyle(a).borderRadius) > 10),
+        bottom: [...document.querySelectorAll('#bottomlink a')].filter(visible).length,
+        credits: visible(document.querySelector('#footer small')),
+        notice: document.body.innerText.includes('All trademarks and copyrights on this page are owned by their respective owners.'),
+        flag: visible(document.querySelector('img[src*="flagcounter"]')),
+      };
+    });
+    check('board: pager links are pills; the footer links, credits, notice and counter are all still there', foot.pills && foot.bottom === 4 && foot.credits && foot.notice && foot.flag, JSON.stringify(foot));
+  } else {
+    check('votes: the board loaded in a fresh context', false);
+  }
+  await vctx.close();
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);
