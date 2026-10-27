@@ -1,11 +1,11 @@
 // End-to-end check against the live board, in headless Chromium.
 //
 // The script is added as an init script (main world, every frame, before the site's own scripts),
-// which tests the UI without Tampermonkey; frames outside the
-// @match are skipped by the wrapper, as the manager would skip them.
+// which tests the UI without Tampermonkey; frames outside the @match are skipped by the wrapper, as
+// the manager would skip them. GM storage is absent here, so the script's localStorage fallback runs.
 //
 // Nothing is ever submitted: posting to a public board is not a test step. The checks stop at
-// "the form floats, opens, holds the quote, and still carries the Turnstile widget".
+// "the form floats, opens, holds the quote, carries resto and the Turnstile widget, and posts into the sink".
 //
 // Usage: node test/e2e.mjs [out-dir]     (PLAYWRIGHT_MODULE=<path to the playwright package> if it
 //        is not resolvable from here, KR_CHROMIUM=<browser executable> if its browser is not
@@ -15,7 +15,6 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
@@ -37,12 +36,13 @@ const check = (name, ok, detail = '') => {
   results.push({ name, ok: !!ok, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 };
+const shot = async (page, name) => out && page.screenshot({ path: path.join(out, name) });
 
 // KR_CHROMIUM: a Chromium/Chrome executable, when the playwright package's own build is not downloaded
 const browser = await chromium.launch({ headless: true, executablePath: process.env.KR_CHROMIUM || undefined });
 let code = 0;
 try {
-  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW' });
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW', colorScheme: 'light' });
   await context.addInitScript(wrapped);
   const page = await context.newPage();
   const pageErrors = [];
@@ -53,252 +53,248 @@ try {
     console.log(`UNVERIFIABLE  board did not load: ${resp instanceof Error ? resp.message : resp?.status()}`);
     process.exit(2);
   }
-  const ready = await page.waitForSelector('#postform_main.kr-composer', { timeout: 20000 }).catch(() => null);
-  if (!ready) {
-    check('script initialised on the board', false, 'no #postform_main.kr-composer');
+  if (!(await page.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null))) {
+    check('script initialised on the board', false, 'no .kr-toolbar');
     throw new Error('stop');
   }
-  // the site binds its own handlers on document ready; let them finish
-  await page.waitForTimeout(1500);
+  // the site binds its own handlers on document ready and inserts its scroll buttons later
+  await page.waitForLoadState('load').catch(() => {});
+  await page.waitForTimeout(1800);
 
-  // --- floating composer on the board
+  // --- toolbar replaces the site's header
+  const bar = await page.evaluate(() => ({
+    title: document.querySelector('.kr-toolbar-title')?.textContent,
+    headerHidden: getComputedStyle(document.getElementById('header')).display === 'none',
+    themeInMenu: !!document.querySelector('.kr-menu #theme-selector'),
+    online: !!document.querySelector('.kr-toolbar #online-counter'),
+    menuLinks: document.querySelectorAll('.kr-menu a').length,
+  }));
+  check('toolbar: board title on top, the site header folded into ⋯', bar.title === '綜合避難所' && bar.headerHidden && bar.themeInMenu && bar.online && bar.menuLinks >= 5, JSON.stringify(bar));
+  await page.locator('.kr-toolbar .kr-btn[aria-haspopup="menu"]').click();
+  const menuOpen = await page.evaluate(() => !document.querySelector('.kr-menu').hidden);
+  // somewhere inert: a click on a row would open a thread
+  await page.locator('.kr-toolbar-title').click();
+  check('toolbar: ⋯ opens the menu and a click elsewhere shuts it', menuOpen && (await page.evaluate(() => document.querySelector('.kr-menu').hidden)));
+
+  // --- floating form, 發新串 mode
   await page.evaluate(() => window.scrollTo(0, 4000));
   await page.waitForTimeout(300);
   const fab = await page.evaluate(() => {
     const f = document.getElementById('postform_main');
     const r = f.getBoundingClientRect();
+    const resto = f.querySelector('input[name="resto"]');
     return {
       position: getComputedStyle(f).position,
       state: f.dataset.krState,
       inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
       label: f.querySelector('.kr-composer-toggle')?.textContent,
-      scrollY: Math.round(scrollY),
       width: Math.round(r.width),
+      scrollY: Math.round(scrollY),
+      restoDisabled: !!resto?.disabled,
+      target: f.target,
     };
   });
-  check('board: form floats in view after scrolling down', fab.position === 'fixed' && fab.inView && fab.scrollY > 1000, JSON.stringify(fab));
-  check('board: folded it is a small pill, not a bar across the page', fab.width < 240, `${fab.width}px`);
-  check('board: form starts collapsed as 發新串', fab.state === 'collapsed' && /發新串/.test(fab.label || ''), fab.label);
-  if (out) await page.screenshot({ path: path.join(out, '1-board-scrolled.png') });
-
-  await page.click('#postform_main .kr-composer-toggle');
+  check('board: form floats in view after scrolling, as a small 發新串 pill', fab.position === 'fixed' && fab.inView && fab.scrollY > 1000 && fab.width < 240 && fab.state === 'collapsed' && /發新串/.test(fab.label || ''), JSON.stringify(fab));
+  check('board: 發新串 posts without resto, into the hidden result frame', fab.restoDisabled && fab.target === 'kr-sink' && (await page.locator('iframe[name="kr-sink"]').count()) === 1, JSON.stringify(fab));
+  await page.locator('.kr-toolbar .kr-btn.kr-primary').click();
   const opened = await page.evaluate(() => {
     const f = document.getElementById('postform_main');
     const ta = document.getElementById('fcom');
     const r = ta.getBoundingClientRect();
-    return {
-      state: f.dataset.krState,
-      fcomVisible: r.height > 60 && r.top >= 0 && r.bottom <= innerHeight,
-      focused: document.activeElement === ta,
-      turnstile: !!f.querySelector('.cf-turnstile'),
-    };
+    return { state: f.dataset.krState, fcomVisible: r.height > 60 && r.top >= 0 && r.bottom <= innerHeight, focused: document.activeElement === ta, turnstile: !!f.querySelector('.cf-turnstile') };
   });
-  check('board: opening it shows the text box, focused, Turnstile still inside the form', opened.state === 'expanded' && opened.fcomVisible && opened.focused && opened.turnstile, JSON.stringify(opened));
-  if (out) await page.screenshot({ path: path.join(out, '2-board-compose-open.png') });
+  check('board: ✎ 發新串 opens the form, text box focused, Turnstile inside', opened.state === 'expanded' && opened.fcomVisible && opened.focused && opened.turnstile, JSON.stringify(opened));
+  await shot(page, '2-board-compose-open.png');
   await page.keyboard.press('Escape');
   check('board: Esc folds it again', (await page.evaluate(() => document.getElementById('postform_main').dataset.krState)) === 'collapsed');
+  await page.evaluate(() => window.scrollTo(0, 0));
 
-  // --- board master list and docked detail
-  const list = await page.evaluate(() => {
-    const cards = [...document.querySelectorAll('#threads .thread')];
-    return cards.map((card) => ({
+  // --- master list
+  const list = await page.evaluate(() =>
+    [...document.querySelectorAll('#threads .thread')].map((card) => ({
       res: Number(card.dataset.no),
       replies: card.querySelectorAll('.post.reply').length,
-      hidden: [...card.querySelectorAll('.post.reply')].every((reply) => getComputedStyle(reply).display === 'none'),
-      peek: card.classList.contains('kr-peek'),
+      hidden: [...card.querySelectorAll('.post.reply')].every((r) => getComputedStyle(r).display === 'none'),
+      label: card.querySelector('.kr-meta-count')?.textContent || '',
       meta: card.querySelectorAll('.kr-meta').length,
-      label: card.querySelector('.kr-meta')?.textContent || '',
       omitted: card.querySelector('.warn_txt2')?.textContent || '',
-    }));
-  });
-  check('board: replies start collapsed in every card', list.length > 0 && list.every((card) => !card.peek && card.hidden), `${list.length} cards`);
-  check('board: every card has one accurate reply count', list.length > 0 && list.every((card) => card.meta === 1 &&
-    (card.replies + omittedCount(card.omitted) ? card.label.includes(`💬 ${card.replies + omittedCount(card.omitted)} 則回應`) : card.label.includes('還沒有回應'))));
-  const initial = await page.evaluate(() => ({
-    md: document.documentElement.classList.contains('kr-md'),
+      image: !!card.querySelector('.threadpost .md5-image'),
+      quotes: card.querySelectorAll('.post.reply .quote a[href*="#r"]').length,
+      untitledShown: [...card.querySelectorAll('.threadpost .title')].some((t) => t.textContent.trim() === '無題' && getComputedStyle(t).display !== 'none'),
+      when: !!card.querySelector('.kr-when'),
+    })),
+  );
+  check('list: replies start collapsed in every row', list.length > 0 && list.every((c) => c.hidden), `${list.length} rows`);
+  check('list: one accurate reply count per row', list.every((c) => c.meta === 1 &&
+    (c.replies + omittedCount(c.omitted) ? c.label.includes(`💬 ${c.replies + omittedCount(c.omitted)} 則回應`) : c.label.includes('還沒有回應'))));
+  check('list: 無題 is not shown as a title; each row has its time in the corner', list.every((c) => !c.untitledShown && c.when));
+  await shot(page, '1-board.png');
+
+  const empty = await page.evaluate(() => ({
     docked: document.documentElement.classList.contains('kr-docked'),
-    visible: getComputedStyle(document.querySelector('.kr-drawer')).visibility,
-    empty: document.querySelector('.kr-drawer-empty')?.textContent,
+    pane: getComputedStyle(document.querySelector('.kr-pane')).visibility,
+    empty: getComputedStyle(document.querySelector('.kr-pane-empty')).display !== 'none',
+    bodyRight: getComputedStyle(document.body).marginRight,
+    paneWidth: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().width),
   }));
-  check('detail: docked and empty before selection', initial.md && initial.docked && initial.visible === 'visible' && initial.empty.includes('點左邊任一串'), JSON.stringify(initial));
-  const target = list.find((card) => card.replies)?.res;
+  check('pane: docked on the right and empty before a row is chosen', empty.docked && empty.pane === 'visible' && empty.empty && empty.bodyRight === `${empty.paneWidth}px`, JSON.stringify(empty));
+  const arrows = await page.evaluate(() => {
+    const n = document.querySelector('.kr-site-scroll');
+    return n ? { right: Math.round(n.getBoundingClientRect().right), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) } : null;
+  });
+  check("list: the site's ▲▼ buttons sit at the list's edge, not under the pane", !!arrows && arrows.right <= arrows.paneLeft, JSON.stringify(arrows));
+
+  // a thread with replies, an OP image and, if any, in-thread quotes
+  const target = (list.find((c) => c.replies && c.image && c.quotes) || list.find((c) => c.replies && c.image) || list.find((c) => c.replies))?.res;
   if (!target) {
-    console.log('UNVERIFIABLE  no thread on page 1 has replies to inspect');
+    console.log('UNVERIFIABLE  no thread on page 1 has replies');
     code = 2;
     throw new Error('stop');
   }
   const urlBefore = page.url();
-  // a plain, non-link spot of the card: OP text may start with a URL or >>No., which are links and rightly not card clicks
-  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
-  const frameEl = await page.waitForSelector('iframe[name="kr-drawer"]');
-  let frame = await frameEl.contentFrame();
-  await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 });
-  await frame.waitForSelector('#postform_main.kr-composer.kr-reply', { timeout: 20000 });
-  await page.waitForTimeout(1200);
-  const drawer = await page.evaluate(() => {
-    const d = document.querySelector('.kr-drawer');
-    const r = d.getBoundingClientRect();
-    return {
-      open: document.documentElement.classList.contains('kr-drawer-open'),
-      width: Math.round(r.width),
-      right: Math.round(r.right),
-      bodyMargin: getComputedStyle(document.body).marginRight,
-      title: d.querySelector('.kr-drawer-title').textContent,
-      newtab: d.querySelector('.kr-drawer-newtab').getAttribute('href'),
-      active: document.querySelector('#threads .thread.kr-selected')?.getAttribute('data-no'),
-    };
-  });
-  check('drawer: opens on the right, board stays on the left', drawer.open && drawer.right === 1600 && drawer.width >= 380 && drawer.bodyMargin === `${drawer.width}px`, JSON.stringify(drawer));
-  check('drawer: titled with the thread, marks it in the list', drawer.title.includes(`No.${target}`) && drawer.newtab === `pixmicat.php?res=${target}` && drawer.active === String(target), drawer.title);
-  check('drawer: board page did not navigate', page.url() === urlBefore, page.url());
-  check('board: clicking a card selects and loads its thread', drawer.active === String(target) && frame.url().includes(`res=${target}`));
-  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta button`).click();
-  const peek = await page.evaluate((res) => {
-    const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
-    return card.classList.contains('kr-peek') && [...card.querySelectorAll('.post.reply')].every((reply) => getComputedStyle(reply).display !== 'none');
+  const t0 = Date.now();
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta-count`).click();
+  await page.waitForSelector('.kr-pane .kr-post', { timeout: 5000 });
+  const instantMs = Date.now() - t0;
+  await page.waitForFunction(() => !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => null);
+  const fullMs = Date.now() - t0;
+  // the truth, fetched independently of the script
+  const truth = await page.evaluate(async (res) => {
+    const html = await (await fetch(`pixmicat.php?res=${res}`)).text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const thread = doc.querySelector(`#threads .thread[data-no="${res}"]`);
+    const posts = [...thread.querySelectorAll('.post[data-no]')];
+    return { posts: posts.length, firstMedia: posts.map((p) => p.querySelector('.md5-image[data-image-original]')?.getAttribute('data-image-original')).find(Boolean) || null };
   }, target);
-  check('board: peek reveals only that card’s latest replies', peek);
-  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta button`).click();
-  const inside = await frame.evaluate(() => ({
-    embed: document.documentElement.classList.contains('kr-embed'),
-    headerHidden: getComputedStyle(document.getElementById('header')).display === 'none',
-    resto: document.querySelector('#postform_main input[name="resto"]')?.value,
-    composerFixed: getComputedStyle(document.getElementById('postform_main')).position,
-    backlinkHidden: (() => {
-      const b = document.querySelector('#postform_main a[href^="index.htm"]');
-      return !b || b.getClientRects().length === 0;
-    })(),
-    turnstile: !!document.querySelector('#postform_main .cf-turnstile'),
-    posts: document.querySelectorAll('#threads .post').length,
+  const shown = await page.evaluate(() => ({
+    posts: document.querySelectorAll('.kr-pane .kr-post').length,
+    sub: document.querySelector('.kr-pane-sub').textContent,
+    title: document.querySelector('.kr-pane-title').textContent,
+    selected: document.querySelector('#threads .thread.kr-selected')?.dataset.no,
+    media: [...document.querySelectorAll('.kr-pane .kr-post-media img, .kr-pane .kr-post-media video')].map((m) => ({ src: m.getAttribute('src'), w: Math.round(m.getBoundingClientRect().width), natural: m.naturalWidth || m.videoWidth || 0 })),
   }));
-  check('drawer: thread page inside, header gone, its own reply form docked with resto and Turnstile', inside.embed && inside.headerHidden && inside.resto === String(target) && inside.composerFixed === 'fixed' && inside.backlinkHidden && inside.turnstile && inside.posts > 1, JSON.stringify(inside));
+  check('pane: what the board already shows appears at once, before the fetch', instantMs < 500, `${instantMs} ms to first post, ${fullMs} ms to the whole thread`);
+  check('pane: the whole thread is drawn — every post the thread page has', shown.posts === truth.posts && shown.sub.includes(`No.${target}`) && shown.sub.includes(`${truth.posts - 1} 則回應`), JSON.stringify({ shown: shown.posts, truth: truth.posts, sub: shown.sub }));
+  check('pane: the row is marked and the board did not navigate', shown.selected === String(target) && page.url() === urlBefore);
+  await page.waitForTimeout(1500);
+  const firstImg = await page.evaluate((src) => {
+    const m = [...document.querySelectorAll('.kr-pane .kr-post-media img, .kr-pane .kr-post-media video')].find((n) => n.getAttribute('src') === src);
+    return m ? { tag: m.tagName, w: Math.round(m.getBoundingClientRect().width), natural: m.naturalWidth || m.videoWidth || 0 } : null;
+  }, truth.firstMedia);
+  check('pane: images are the originals, shown large without a click', !!truth.firstMedia && !!firstImg && firstImg.w > 250, JSON.stringify({ firstImg, src: truth.firstMedia?.slice(-40) }));
+  const reply = await page.evaluate((res) => {
+    const f = document.getElementById('postform_main');
+    const resto = f.querySelector('input[name="resto"]');
+    return { cls: f.classList.contains('kr-reply-pane'), resto: resto?.value, disabled: resto?.disabled, category: f.querySelector('input[name="category"]')?.value, label: f.querySelector('.kr-composer-toggle').textContent, want: String(res) };
+  }, target);
+  check('composer: switches to replying to the open thread (resto set, category cleared like the site)', reply.cls && reply.resto === reply.want && !reply.disabled && reply.category === '' && reply.label.includes(`No.${reply.want}`), JSON.stringify(reply));
+  await shot(page, '3-thread.png');
 
-  // --- No. inside the drawer quotes into the drawer's form
-  const replyNo = await frame.evaluate(() => {
-    const posts = [...document.querySelectorAll('#threads .post.reply')];
-    return posts.length ? Number(posts[Math.min(2, posts.length - 1)].dataset.no) : null;
-  });
-  await frame.click(`#r${replyNo} .post-head .qlink`);
-  await page.waitForTimeout(300);
-  const quoted = await frame.evaluate(() => ({
-    value: document.getElementById('fcom').value,
-    state: document.getElementById('postform_main').dataset.krState,
-    quickreply: (() => {
-      const q = document.getElementById('quickreply');
-      return q ? getComputedStyle(q).display : 'absent';
-    })(),
-  }));
-  check('drawer: clicking No. quotes it into the docked form and opens it', quoted.value.includes(`>>${replyNo}\n`) && quoted.state === 'expanded', JSON.stringify(quoted));
-  check("drawer: the site's quick-reply box does not pop up as well", quoted.quickreply === 'none' || quoted.quickreply === 'absent', quoted.quickreply);
-  if (out) await page.screenshot({ path: path.join(out, '3-drawer-quote.png') });
-
-  await frame.press('#fcom', 'Escape');
-  check('drawer: Esc in the text box folds the form, drawer stays', (await frame.evaluate(() => document.getElementById('postform_main').dataset.krState)) === 'collapsed' && (await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open'))));
-  // leave the thread inside the drawer, then ask for the same thread again: it must load again
-  await frame.goto(BOARD, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  const left = await page
-    .waitForFunction((t) => !document.querySelector('.kr-drawer-title').textContent.includes(`No.${t}`), target, { timeout: 20000 })
-    .then(() => true, () => false);
-  // reopen through the OP thumbnail when there is one: in the list it opens the thread instead of expanding the image
-  // the <a class="file-thumb"> has a 0×0 inline box; what a reader hits is its <img>
-  const thumbSel = `#threads .thread[data-no="${target}"] .threadpost .file-thumb img`;
-  const viaThumb = (await page.locator(thumbSel).count()) > 0;
-  await (viaThumb ? page.locator(thumbSel).first().click({ position: { x: 20, y: 20 } }) : page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click());
-  const back = await frame.waitForURL(new RegExp(`res=${target}`), { timeout: 30000 }).then(() => true, () => false);
-  const expandedInList = await page.evaluate((t) => !!document.querySelector(`#threads .thread[data-no="${t}"] .threadpost .-expanded`), target);
-  check('drawer: after browsing off the thread inside it, opening that thread again reloads it', left && back, JSON.stringify({ left, back, url: frame.url() }));
-  if (viaThumb) check('board: an OP thumbnail opens the thread rather than expanding the image in the row', back && !expandedInList, JSON.stringify({ back, expandedInList }));
-  await frame.waitForSelector('#postform_main.kr-composer.kr-reply', { timeout: 20000 }).catch(() => null);
-
-  await frame.press('body', 'Escape');
-  await page.waitForTimeout(200);
-  check('drawer: Esc clears selection and restores the empty dock', await page.evaluate(() => !document.documentElement.classList.contains('kr-drawer-open') && document.documentElement.classList.contains('kr-docked') && !document.querySelector('.kr-selected')));
-
-  // --- No. on the board opens that thread in the drawer with the quote ready
-  const boardReply = await page.evaluate(() => {
-    const p = document.querySelector('#threads .thread .post.reply');
-    return p ? { no: Number(p.dataset.no), op: Number(p.closest('.thread').dataset.no) } : null;
-  });
-  if (boardReply) {
-    await page.locator(`#threads .thread[data-no="${boardReply.op}"] .kr-meta button`).click();
-    await page.click(`#r${boardReply.no} .post-head .qlink`);
-    frame = await (await page.waitForSelector('iframe[name="kr-drawer"]')).contentFrame();
-    await frame.waitForURL(new RegExp(`res=${boardReply.op}`), { timeout: 30000 });
-    await frame.waitForFunction((no) => document.getElementById('fcom')?.value.includes(`>>${no}`), boardReply.no, { timeout: 20000 }).catch(() => null);
-    const v = await frame.evaluate(() => document.getElementById('fcom')?.value || '');
-    const qr = await page.evaluate(() => {
-      const q = document.getElementById('quickreply');
-      return q ? getComputedStyle(q).display : 'absent';
-    });
-    check('board: clicking a reply No. opens its thread beside with the quote in the form', v.includes(`>>${boardReply.no}\n`), JSON.stringify({ ...boardReply, v }));
-    check("board: the site's quick-reply box stays shut", qr === 'none' || qr === 'absent', qr);
-    if (out) await page.screenshot({ path: path.join(out, '4-board-no-to-drawer.png') });
+  // in-thread quotes: hover preview and jump
+  const q = await page.evaluate(() => document.querySelector('.kr-pane .kr-post-text .kr-q[data-no]')?.dataset.no || null);
+  if (q) {
+    // scroll first: the pane hides the preview on scroll, and hover() would scroll and move in one go
+    await page.locator(`.kr-pane .kr-post-text .kr-q[data-no="${q}"]`).first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(150);
+    await page.locator(`.kr-pane .kr-post-text .kr-q[data-no="${q}"]`).first().hover();
+    const preview = await page.evaluate((no) => {
+      const p = document.querySelector('.kr-preview');
+      return !p.hidden && !!p.querySelector(`[data-no="${no}"]`);
+    }, q);
+    await page.locator(`.kr-pane .kr-post-text .kr-q[data-no="${q}"]`).first().click();
+    const flashed = await page.evaluate((no) => document.getElementById(`kr-p${no}`)?.classList.contains('kr-flash'), q);
+    check('pane: hovering >>No. previews that post', preview, `>>${q}`);
+    check('pane: clicking >>No. jumps to that post', flashed, `>>${q}`);
   } else {
-    check('board: a reply to click No. on', false, 'no replies on page 1');
+    console.log('NOTE  this thread has no in-thread >>No. quote; hover/jump not exercised');
+  }
+  const backlinks = await page.evaluate(() => document.querySelectorAll('.kr-pane .kr-backlinks a').length);
+  check('pane: posts list who replied to them', !q || backlinks > 0, `${backlinks} backlinks`);
+
+  // No. quotes into the reply form
+  const replyNo = await page.evaluate(() => [...document.querySelectorAll('.kr-pane .kr-post:not(.kr-post-op) .kr-post-no')].at(-1)?.dataset.no);
+  await page.locator(`.kr-pane .kr-post-no[data-no="${replyNo}"]`).click();
+  const quoted = await page.evaluate(() => ({ value: document.getElementById('fcom').value, state: document.getElementById('postform_main').dataset.krState, turnstile: !!document.querySelector('#postform_main .cf-turnstile') }));
+  check('pane: No. quotes into the reply form and opens it; Turnstile is in that form', quoted.value.includes(`>>${replyNo}\n`) && quoted.state === 'expanded' && quoted.turnstile, JSON.stringify(quoted));
+  await shot(page, '4-reply.png');
+  await page.keyboard.press('Escape');
+  check('pane: Esc folds the form first, the thread stays', (await page.evaluate(() => document.getElementById('postform_main').dataset.krState)) === 'collapsed' && (await page.evaluate(() => document.documentElement.classList.contains('kr-pane-open'))));
+
+  // the image opens full size
+  const img = page.locator('.kr-pane .kr-post-media:not(.kr-spoiler) img').first();
+  if (await img.count()) {
+    await img.click();
+    const box = await page.evaluate(() => !!document.querySelector('.kr-lightbox img'));
+    await page.keyboard.press('Escape');
+    check('pane: an image opens full screen and Esc shuts it', box && !(await page.evaluate(() => !!document.querySelector('.kr-lightbox'))));
   }
 
-  // --- [回應] opens the drawer too
-  await page.evaluate(() => document.querySelector('.kr-drawer-close').click());
+  await page.keyboard.press('Escape');
+  const closed = await page.evaluate(() => ({
+    open: document.documentElement.classList.contains('kr-pane-open'),
+    empty: getComputedStyle(document.querySelector('.kr-pane-empty')).display !== 'none',
+    restoDisabled: document.querySelector('#postform_main input[name="resto"]').disabled,
+    selected: !!document.querySelector('#threads .thread.kr-selected'),
+  }));
+  check('pane: Esc again closes the thread; the form is back to 發新串', !closed.open && closed.empty && closed.restoDisabled && !closed.selected, JSON.stringify(closed));
+
+  // thumbnail, [回應], j
+  const thumb = page.locator(`#threads .thread[data-no="${target}"] .threadpost .file-thumb img`);
+  if (await thumb.count()) {
+    await thumb.first().click();
+    await page.waitForSelector('.kr-pane .kr-post', { timeout: 5000 }).catch(() => null);
+    const t = await page.evaluate((res) => ({ open: document.querySelector('.kr-pane-sub').textContent.includes(`No.${res}`), expanded: !!document.querySelector(`#threads .thread[data-no="${res}"] .threadpost .-expanded`) }), target);
+    check('list: an OP thumbnail opens the thread rather than expanding the image in the row', t.open && !t.expanded, JSON.stringify(t));
+    await page.keyboard.press('Escape');
+  }
   const rlink = await page.evaluate(() => document.querySelector('#threads .rlink a')?.getAttribute('href'));
   if (rlink) {
     const res = rlink.match(/res=(\d+)/)[1];
-    // the list hides [回應] (the whole card opens the thread); a synthetic click still exercises the link interception
+    // [回應] is hidden in the list (the row opens the thread); a synthetic click still exercises the link interception
     await page.evaluate((h) => document.querySelector(`#threads .rlink a[href="${h}"]`).click(), rlink);
-    frame = await (await page.waitForSelector('iframe[name="kr-drawer"]')).contentFrame();
-    const ok = await frame.waitForURL(new RegExp(`res=${res}`), { timeout: 30000 }).then(() => true, () => false);
-    check('board: [回應] opens the thread in the drawer instead of leaving the board', ok && page.url() === urlBefore, `res=${res}`);
+    const ok = await page.waitForFunction((r) => document.querySelector('.kr-pane-sub').textContent.includes(`No.${r}`), res, { timeout: 5000 }).then(() => true, () => false);
+    check('list: a thread link opens the pane instead of leaving the board', ok && page.url() === urlBefore, `res=${res}`);
+    await page.keyboard.press('Escape');
   }
-
-  await page.locator('.kr-drawer-close').click();
+  await page.locator('.kr-toolbar-title').click();
   await page.keyboard.press('j');
-  const keyboardRes = await page.evaluate(() => document.querySelector('#threads .thread.kr-selected')?.dataset.no);
-  // the pane only starts loading 250 ms after the last j; the frame URL changes when that navigation commits
-  const keyboardLoaded = !!keyboardRes && (await frame.waitForURL(new RegExp(`res=${keyboardRes}`), { timeout: 30000 }).then(() => true, () => false));
-  check('board: j selects the next card and loads it after debounce', keyboardLoaded, `res=${keyboardRes} frame=${frame.url()}`);
-  await page.locator('.kr-drawer-close').click();
-  check('detail: × clears selection but leaves dock visible', await page.evaluate(() => !document.querySelector('.kr-selected') && document.documentElement.classList.contains('kr-docked') && getComputedStyle(document.querySelector('.kr-drawer')).visibility === 'visible'));
+  const keyRes = await page.evaluate(() => document.querySelector('#threads .thread.kr-selected')?.dataset.no);
+  const keyOpen = !!keyRes && (await page.waitForFunction((r) => document.querySelector('.kr-pane-sub').textContent.includes(`No.${r}`), keyRes, { timeout: 5000 }).then(() => true, () => false));
+  check('list: j selects the next row and the pane follows', keyOpen, `res=${keyRes}`);
+  await page.keyboard.press('Escape');
 
+  // dark appearance follows the system while the site theme is 預設
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(200);
+  const dark = await page.evaluate(() => ({ attr: document.documentElement.hasAttribute('data-kr-dark'), bg: getComputedStyle(document.body).backgroundColor }));
+  await shot(page, '5-dark.png');
+  await page.emulateMedia({ colorScheme: 'light' });
+  check('theme: dark follows the system while the site theme is 預設', dark.attr && /rgb\((1\d|2\d|3\d), /.test(dark.bg), JSON.stringify(dark));
+
+  // narrow window
   await page.setViewportSize({ width: 800, height: 900 });
-  // leaving the docked layout, the pane slides out over its .18 s transition
+  await page.waitForFunction(() => innerWidth === 800);
   await page.waitForTimeout(400);
-  const mobileBefore = await page.evaluate(() => ({
-    docked: document.documentElement.classList.contains('kr-docked'),
-    visibility: getComputedStyle(document.querySelector('.kr-drawer')).visibility,
-  }));
-  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
-  await page.waitForTimeout(300);
-  const mobileOpen = await page.evaluate(() => {
-    const r = document.querySelector('.kr-drawer').getBoundingClientRect();
-    return { open: document.documentElement.classList.contains('kr-drawer-open'), width: Math.round(r.width), left: Math.round(r.left), innerWidth };
+  const narrow = await page.evaluate(() => ({ docked: document.documentElement.classList.contains('kr-docked'), pane: getComputedStyle(document.querySelector('.kr-pane')).visibility }));
+  await page.locator(`#threads .thread[data-no="${target}"] .kr-meta-count`).click();
+  await page.waitForTimeout(400);
+  const narrowOpen = await page.evaluate(() => {
+    const r = document.querySelector('.kr-pane').getBoundingClientRect();
+    return { open: document.documentElement.classList.contains('kr-pane-open'), left: Math.round(r.left), width: Math.round(r.width), innerWidth };
   });
-  await page.locator('.kr-drawer-back').click();
-  const mobileClosed = !(await page.evaluate(() => document.documentElement.classList.contains('kr-drawer-open')));
-  check(
-    'mobile: card opens full-width overlay and ‹ 列表 closes it',
-    !mobileBefore.docked && mobileBefore.visibility === 'hidden' && mobileOpen.open && mobileOpen.left === 0 && mobileOpen.width >= mobileOpen.innerWidth - 20 && mobileClosed,
-    JSON.stringify({ mobileBefore, mobileOpen, mobileClosed }),
-  );
-  if (out) {
-    await page.locator(`#threads .thread[data-no="${target}"] .kr-meta > span`).click();
-    await page.waitForTimeout(1500);
-    await page.screenshot({ path: path.join(out, '6-mobile-detail.png') });
-    await page.locator('.kr-drawer-back').click();
-    await page.screenshot({ path: path.join(out, '5-mobile-list.png') });
-  }
-
-  const mobileSide = await page.evaluate(() => ({
-    hidden: getComputedStyle(document.querySelector('.kr-side')).display === 'none',
-    width: document.documentElement.style.getPropertyValue('--kr-side'),
-  }));
+  await shot(page, '6-mobile-thread.png');
+  await page.locator('.kr-pane-back').click();
+  const narrowClosed = !(await page.evaluate(() => document.documentElement.classList.contains('kr-pane-open')));
+  check('mobile: no docked pane; a row opens it full width and ‹ 列表 goes back', !narrow.docked && narrow.pane === 'hidden' && narrowOpen.open && narrowOpen.left === 0 && narrowOpen.width >= narrowOpen.innerWidth - 20 && narrowClosed, JSON.stringify({ narrow, narrowOpen, narrowClosed }));
+  await shot(page, '7-mobile-list.png');
+  const mobileSide = await page.evaluate(() => ({ hidden: getComputedStyle(document.querySelector('.kr-side')).display === 'none', width: document.documentElement.style.getPropertyValue('--kr-side') }));
   check('mobile: sidebar starts hidden without reserving list width', mobileSide.hidden && mobileSide.width === '0px', JSON.stringify(mobileSide));
   await page.locator('.kr-side-open').click();
-  check('mobile: ☰ opens the sidebar over the list', await page.evaluate(() => {
-    const side = document.querySelector('.kr-side');
-    return getComputedStyle(side).display !== 'none' && document.documentElement.style.getPropertyValue('--kr-side') === '0px';
-  }));
+  check('mobile: ☰ opens the sidebar over the list', await page.evaluate(() => getComputedStyle(document.querySelector('.kr-side')).display !== 'none' && document.documentElement.style.getPropertyValue('--kr-side') === '0px'));
   await page.keyboard.press('Escape');
   check('mobile: Esc closes the sidebar', await page.evaluate(() => getComputedStyle(document.querySelector('.kr-side')).display === 'none'));
 
+  // sidebar
   await page.setViewportSize({ width: 1600, height: 1000 });
   // the resize event (and the layout switch it drives) fires after setViewportSize resolves
   await page.waitForFunction(() => innerWidth === 1600);
@@ -315,8 +311,7 @@ try {
     return toggle ? { expanded: toggle.getAttribute('aria-expanded'), rows: toggle.parentElement.querySelectorAll('.kr-side-row').length, text: toggle.textContent } : null;
   });
   check('sidebar: the 18禁 section starts locked behind the birth-year question', !!adult && adult.expanded === 'false' && adult.rows === 0 && adult.text.includes('🔒') && !adult.text.includes('[鎖定]'), JSON.stringify(adult));
-  const gateToggle = page.locator('.kr-side-group-toggle', { hasText: '18禁' });
-  await gateToggle.click();
+  await page.locator('.kr-side-group-toggle', { hasText: '18禁' }).click();
   await page.locator('.kr-side-gate input').fill('2015');
   await page.locator('.kr-side-gate button[type="submit"]').click();
   const minor = await page.evaluate(() => ({ error: document.querySelector('.kr-side-gate-error')?.textContent, rows: document.querySelectorAll('.kr-side-row a[href="https://2cat.org/touhoux/"]').length }));
@@ -327,10 +322,10 @@ try {
   const inPlace = await page.evaluate(() => {
     const row = document.querySelector('.kr-side-row a[href="https://grea.komica1.org/50/index.htm"]')?.closest('.kr-side-row');
     const group = row?.closest('.kr-side-group')?.querySelector('.kr-side-group-toggle')?.textContent || '';
-    return { dimmed: !!row?.classList.contains('kr-side-down'), group, separate: [...document.querySelectorAll('.kr-side-group-toggle')].some((b) => b.textContent.includes('目前連不上')) };
+    const tagAfterName = row ? row.querySelector('a').compareDocumentPosition(row.querySelector('.kr-side-tag')) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
+    return { dimmed: !!row?.classList.contains('kr-side-down'), group, tagAfterName: !!tagAfterName, separate: [...document.querySelectorAll('.kr-side-group-toggle')].some((b) => b.textContent.includes('目前連不上')) };
   });
-  check('sidebar: an unreachable board stays in its own category, dimmed', inPlace.dimmed && inPlace.group.includes('連線板') && !inPlace.separate, JSON.stringify(inPlace));
-
+  check('sidebar: an unreachable board stays in its category, dimmed, tagged after its name', inPlace.dimmed && inPlace.group.includes('連線板') && inPlace.tagAfterName && !inPlace.separate, JSON.stringify(inPlace));
   await page.locator('.kr-side-search').fill('動畫');
   const searchResult = await page.evaluate(() => {
     const links = [...document.querySelectorAll('.kr-side-list .kr-side-row a')];
@@ -354,35 +349,44 @@ try {
   await page.locator('.kr-side-open').click();
   check('sidebar: ☰ restores the 248px column', await page.evaluate(() => document.documentElement.style.getPropertyValue('--kr-side') === '248px'));
 
+  // portal
   const portalResp = await page.goto('https://komica1.org/', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch((e) => e);
   if (!portalResp || portalResp instanceof Error || !portalResp.ok()) {
     check('portal: entry loads', false, portalResp instanceof Error ? portalResp.message : String(portalResp?.status()));
   } else {
+    // the frameset can replace itself while loading, which detaches a menu frame taken too early: ask for the
+    // current one on every try. A menu that never loads says nothing about the script ("could not check").
     let menu = null;
-    for (let i = 0; i < 40 && !menu; i++) {
+    let state = null;
+    const deadline = Date.now() + 45000;
+    while (Date.now() < deadline) {
       menu = page.frame({ name: 'menu' });
-      if (!menu) await page.waitForTimeout(250);
+      state = menu && !menu.isDetached()
+        ? await menu.evaluate(() => ({ ready: document.readyState, side: !!document.querySelector('.kr-side'), cls: document.documentElement.className })).catch((e) => ({ error: e.message }))
+        : null;
+      if (state?.side) break;
+      await page.waitForTimeout(250);
     }
-    const menuSide = menu ? await menu.waitForSelector('.kr-side', { timeout: 20000 }).then(() => true, () => false) : false;
-    const portal = { ...(await page.evaluate(() => ({ cols: document.querySelector('frameset')?.cols }))), menu: menuSide };
-    check('portal: menu frame has sidebar and frameset starts at 248px', portal.menu && portal.cols?.startsWith('248,'), JSON.stringify(portal));
+    if (!state || state.error || state.ready === 'loading') {
+      console.log(`UNVERIFIABLE  the portal menu frame did not load within 45 s: ${JSON.stringify(state)}`);
+      code = 2;
+      throw new Error('stop');
+    }
+    const portal = { ...(await page.evaluate(() => ({ cols: document.querySelector('frameset')?.cols }))), menu: state };
+    check('portal: menu frame has sidebar and frameset starts at 248px', portal.menu.side && portal.cols?.startsWith('248,'), JSON.stringify(portal));
     await menu.locator('.kr-side-row a[href="https://gaia.komica1.org/00b/index.htm"]').first().click();
     const cont = page.frame({ name: 'cont' });
     await cont.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 });
     await cont.waitForSelector('html.kr-md', { timeout: 20000 });
-    check('portal: 綜合 opens in cont with master detail and no sidebar', await cont.evaluate(() => document.documentElement.classList.contains('kr-md') && !document.querySelector('.kr-side')));
-    if (out) {
-      await page.waitForTimeout(1500);
-      await page.screenshot({ path: path.join(out, '7-portal.png') });
-    }
+    check('portal: 綜合 opens in cont with list and pane, no second sidebar', await cont.evaluate(() => document.documentElement.classList.contains('kr-md') && !!document.querySelector('.kr-pane') && !document.querySelector('.kr-side')));
+    await page.waitForTimeout(1500);
+    await shot(page, '8-portal.png');
   }
 
   const ours = pageErrors.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
   check('no page errors from this script', ours.length === 0, ours.join(' | ') || `${pageErrors.length} from the site itself`);
 } catch (e) {
-  if (e.message !== 'stop') {
-    check('harness ran to the end', false, e.message);
-  }
+  if (e.message !== 'stop') check('harness ran to the end', false, e.message);
 } finally {
   await browser.close();
 }

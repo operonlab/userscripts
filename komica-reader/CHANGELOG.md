@@ -3,6 +3,15 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.4.0 — 2026-10-27
+
+- **A thread shows up at once.** The pane used to load the whole thread page with all of the site's scripts: 2.4 s before anything appeared. It now shows the OP and the replies the board already has straight away (under 0.1 s) and fills in the rest when the server answers (0.5 to 3 s, the server's own time). The row under the pointer and the row after the one you open are fetched ahead.
+- **Images are full size in the thread.** No more clicking each thumbnail; click an image for full screen. `[hidepix]` media stays blurred until clicked.
+- **New look, after macOS:** a toolbar on top of the list (the site's header links and theme are in its **⋯** menu), a translucent sidebar with accent selection, list rows like a mail list, and dark mode that follows the system while the site theme is 預設.
+- Hover `>>No.` in a thread to preview the post; each post lists who replied to it.
+- Replies are written in the board's own form, which now floats over the open thread. It posts into a hidden frame, so the list stays put, and keeps your text unless the post is confirmed.
+- The thread pane no longer has the site's votes, report or edit buttons; **↗** opens the thread in a new tab for those.
+
 ## 0.3.0 — 2026-10-27
 
 - Added a searchable board sidebar on the 綜合 page and in the desktop portal's menu frame. Stars, recent boards, folded categories, and sidebar visibility use userscript storage across hosts.

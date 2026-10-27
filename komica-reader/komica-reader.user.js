@@ -2,9 +2,9 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.3.0
-// @description  Board navigation on Komica's portal and gaia /00b/, with a master-detail thread view and floating post form.
-// @description:zh-TW  K島入口與綜合版側欄導覽、討論串分欄閱讀，以及跟著捲動的發文／回文表單。
+// @version      0.4.0
+// @description  A three-column reader for Komica's 綜合 board and portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
+// @description:zh-TW  K島綜合版與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
 // @license      MIT
 // @homepageURL  https://github.com/operonlab/userscripts/tree/main/komica-reader
@@ -16,16 +16,16 @@
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const FRAME_NAME = 'kr-drawer';
   const WIDTH_KEY = 'kr.drawerWidth';
   const MIN_W = 380;
   const MAX_W = 1000;
-  // the board list keeps at least this much room beside the drawer
+  // the board list keeps at least this much room beside the detail pane
   const LIST_MIN = 360;
 
   // <boards>
@@ -336,11 +336,6 @@
     return Math.round(Math.min(Math.max(w, MIN_W), max));
   }
 
-  // while the drawer waits for thread `loading`, a `ready` from any other page is the previous one,
-  // late; with nothing pending, any page the reader navigated to inside the drawer is accepted
-  function readyAccepted(loading, res) {
-    return loading === null || res === loading;
-  }
 
   function omittedCount(text) {
     const match = /有回應\s+(\d+)\s+篇被省略/.exec(String(text));
@@ -361,25 +356,41 @@
     return length ? Math.max(0, Math.min(length - 1, current + delta)) : -1;
   }
 
-  // first non-transparent `rgb()/rgba()` among computed backgrounds, so the drawer matches the site theme
-  function opaqueColor(colors, fallback) {
-    for (const c of colors) {
-      const m = /^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(String(c).trim());
-      if (!m) continue;
-      const a = m[4] === undefined ? 1 : m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
-      if (a > 0.5) return `rgb(${m[1]}, ${m[2]}, ${m[3]})`;
-    }
-    return fallback;
+
+  function mediaKind(src) {
+    return /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(String(src)) ? 'video' : 'image';
+  }
+
+  // "1793….png-(1879 KB, 1054x1536)" → { w, h }, so an image keeps its box before it loads
+  function fileDims(info) {
+    const m = /(\d{2,5})\s*[x×]\s*(\d{2,5})\s*\)/.exec(String(info));
+    return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+  }
+
+  // what the page a post lands on tells us: the board itself → posted; a redirect → wait for its target;
+  // anything else is not a verdict either way, and the caller has to check
+  function postOutcome({ readable, threads, redirect, text }) {
+    if (!readable) return { kind: 'unknown', message: '讀不到送出後的回應頁' };
+    if (threads) return { kind: 'ok' };
+    if (redirect) return { kind: 'wait' };
+    const said = String(text).replace(/\s+/g, ' ').trim().slice(0, 160);
+    return { kind: 'unknown', message: said ? `回應頁寫著：「${said}」` : '回應頁是空的' };
+  }
+
+  // the first line of a reply that is not a >>No. quote: what to look for in the thread afterwards
+  function postedProbe(text) {
+    const line = String(text).split('\n').map((l) => l.trim()).find((l) => l && !/^>>\d+$/.test(l));
+    return line ? line.slice(0, 30) : '';
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
   if (location.hostname === 'komica1.org' && !(location.pathname === '/bbsmenu.html' && window.name === 'menu')) return;
   if (window.__krState) return;
-  const state = (window.__krState = { drawer: null, sideWidth: 0 });
+  const state = (window.__krState = { pane: null, sideWidth: 0 });
 
   const store = {
     get(key, fallback) {
@@ -401,153 +412,240 @@
     },
   };
 
-  let embedded = false;
-  try {
-    embedded = window.name === FRAME_NAME && window.parent !== window && window.parent.location.origin === location.origin;
-  } catch {
-    embedded = false;
-  }
-
   // set in start(): at document-start the <html> element may not exist yet
   let root = null;
 
   const CSS = `
-html.kr { --kr-bg: #fff; --kr-line: color-mix(in srgb, currentColor 16%, transparent); --kr-drawer-w: 560px; --kr-side: 0px; }
-html.kr body { font-family: system-ui, -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
-html.kr #threads .quote { font-size: 15px; line-height: 1.75; }
-html.kr #threads .thread { max-width: 1100px; margin: 0 auto 18px; padding: 12px 16px 14px; border: 1px solid var(--kr-line);
-  border-radius: 14px; background: color-mix(in srgb, currentColor 3%, transparent); }
-html.kr #threads .thread > hr { display: none; }
-html.kr #threads .thread.kr-selected { outline: 2px solid color-mix(in srgb, currentColor 45%, transparent); outline-offset: 2px; }
-html.kr #threads .post.reply { border-radius: 10px; padding: 6px 12px; max-width: calc(100% - 24px); box-sizing: border-box; }
-html.kr #threads .post-head { line-height: 1.6; }
-html.kr-md #threads .thread { cursor: pointer; }
+/* macOS-style tokens; dark follows the site's 夜間 theme, or the system when the site is on 預設 */
+html.kr {
+  --kr-accent: #0a84ff; --kr-text: #1d1d1f; --kr-text2: #6e6e73; --kr-text3: #a1a1a6;
+  --kr-bg: #ffffff; --kr-list-bg: #f2f2f5; --kr-card: #ffffff; --kr-fill: rgba(120, 120, 128, .12); --kr-fill2: rgba(120, 120, 128, .2);
+  --kr-sep: rgba(0, 0, 0, .1); --kr-glass: rgba(246, 246, 248, .78); --kr-bar: rgba(255, 255, 255, .86);
+  --kr-shadow: 0 10px 34px rgba(0, 0, 0, .14); --kr-r: 12px; --kr-drawer-w: 560px; --kr-side: 0px;
+  --kr-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --kr-sel: color-mix(in srgb, var(--kr-accent) 13%, var(--kr-card));
+}
+html.kr[data-kr-dark] {
+  --kr-text: #f5f5f7; --kr-text2: #a1a1a6; --kr-text3: #6e6e73;
+  --kr-bg: #1e1e20; --kr-list-bg: #141416; --kr-card: #232326; --kr-fill: rgba(120, 120, 128, .24); --kr-fill2: rgba(120, 120, 128, .36);
+  --kr-sep: rgba(255, 255, 255, .1); --kr-glass: rgba(38, 38, 41, .8); --kr-bar: rgba(30, 30, 32, .86); --kr-shadow: 0 10px 34px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+html.kr body { font-family: var(--kr-font); -webkit-font-smoothing: antialiased; }
+html.kr-md body, html.kr-thread body { background: var(--kr-list-bg) !important; color: var(--kr-text) !important; }
+html.kr-md #threads a, html.kr-thread #threads a { color: var(--kr-accent); }
+.kr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; min-width: 28px; padding: 0 11px; box-sizing: border-box;
+  border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text) !important; font: 500 13px/1 var(--kr-font); text-decoration: none !important;
+  cursor: pointer; white-space: nowrap; }
+.kr-btn:hover { background: var(--kr-fill2); }
+.kr-btn.kr-primary { background: var(--kr-accent); color: #fff !important; }
+.kr-btn.kr-primary:hover { background: color-mix(in srgb, var(--kr-accent) 88%, #000); }
+
+/* board page: a toolbar on top of the list column, the site's header folded into its ⋯ menu */
+html.kr-md body { margin: 0 var(--kr-drawer-w) 0 var(--kr-side) !important; padding: 0 18px 28px !important; }
+html.kr-md #header, html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
+html.kr-md #del, html.kr-md #threads .thread > hr { display: none !important; }
+html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; margin: 0 -18px 12px; padding: 10px 18px;
+  background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
+  border-bottom: .5px solid var(--kr-sep); font-family: var(--kr-font); color: var(--kr-text); }
+html.kr .kr-toolbar-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
+html.kr .kr-toolbar-title { font: 700 17px/1.2 var(--kr-font); overflow: hidden; text-overflow: ellipsis; }
+html.kr .kr-toolbar-sub, html.kr .kr-toolbar #online-counter { font: 12px var(--kr-font) !important; color: var(--kr-text2); margin: 0 !important; }
+html.kr .kr-menu { position: absolute; top: calc(100% + 6px); right: 14px; z-index: 60; min-width: 220px; padding: 6px; border-radius: 12px;
+  background: var(--kr-glass); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: .5px solid var(--kr-sep); box-shadow: var(--kr-shadow); }
+html.kr .kr-menu[hidden] { display: none; }
+html.kr .kr-menu a { display: block; padding: 6px 10px; border-radius: 6px; color: var(--kr-text) !important; text-decoration: none; font-size: 13px; }
+html.kr .kr-menu a:hover { background: var(--kr-accent); color: #fff !important; }
+html.kr .kr-menu-sep { height: .5px; margin: 6px 4px; background: var(--kr-sep); }
+html.kr .kr-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--kr-text2); }
+html.kr .kr-menu-row select { font: inherit; }
+html.kr #gaia-vote-pause-notice { position: fixed !important; left: calc(var(--kr-side) + 18px) !important; right: auto !important; top: auto !important; bottom: 16px !important;
+  z-index: 60 !important; width: auto !important; max-width: 300px; margin: 0 !important; padding: 6px 12px !important; border: 0 !important; border-radius: 999px !important;
+  background: var(--kr-glass) !important; backdrop-filter: blur(20px); color: var(--kr-text2) !important; font: 12px var(--kr-font) !important; box-shadow: var(--kr-shadow) !important; }
+
+/* master rows */
+html.kr-md #threads .thread { max-width: 980px; margin: 0 auto 8px; padding: 12px 14px; border: 0; border-radius: var(--kr-r); background: var(--kr-card) !important;
+  box-shadow: 0 0 0 .5px var(--kr-sep), 0 1px 2px rgba(0, 0, 0, .04); color: var(--kr-text); cursor: pointer;
+  content-visibility: auto; contain-intrinsic-size: auto 124px; }
+html.kr-md #threads .thread:hover { background: color-mix(in srgb, var(--kr-card) 95%, var(--kr-text)) !important; }
+html.kr-md #threads .thread.kr-selected { background: var(--kr-sel) !important; box-shadow: 0 0 0 1.5px var(--kr-accent); }
+html.kr-md #threads .post { background: none !important; color: var(--kr-text) !important; border: 0 !important; }
 html.kr-md #threads .thread:not(.kr-peek) .post.reply, html.kr-md #threads .warn_txt2 { display: none !important; }
-html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
-  margin: 4px 0 0; font-size: 14px; line-height: 1.6; }
-/* a master row: thumbnail, title line, three lines of text, the reply meta; the rest lives in the detail pane */
-html.kr-md #threads .thread { margin-bottom: 10px; padding: 10px 14px; }
 html.kr-md #threads .threadpost .file-text, html.kr-md #threads .threadpost .post-head input[type="checkbox"],
 html.kr-md #threads .threadpost .post-head .id, html.kr-md #threads .threadpost .post-action-wrap, html.kr-md #threads .threadpost .rlink,
 html.kr-md #threads .threadpost .postvote-slot, html.kr-md #threads .threadpost .category, html.kr-md #threads .threadpost .backquote,
-html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br { display: none !important; }
-html.kr-md #threads .threadpost .file-thumb img { width: 88px !important; height: 88px !important; object-fit: cover; border-radius: 8px; }
-html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 4px 0; }
-html.kr-md #threads .threadpost .post-head { font-size: 12px; opacity: .9; }
-html.kr-md #threads .threadpost .post-head .title { font-size: 15px; margin-right: 6px; }
-html.kr-md #threads .thread .kr-meta { clear: both; margin-top: 6px; }
-html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end { display: none !important; }
-html.kr-md #toplink { font-size: 12px; }
-html.kr-md .kr-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; opacity: .8; }
-html.kr-md .kr-meta button { border: 0; padding: 2px 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
+html.kr-md #threads .threadpost #safari-ad, html.kr-md #threads .threadpost > br, html.kr-md #threads .threadpost .pugid-edit-slot { display: none !important; }
+html.kr-md #threads .threadpost .md5-image { float: left; margin: 2px 12px 2px 0; }
+html.kr-md #threads .threadpost .file-thumb img { width: 72px !important; height: 72px !important; object-fit: cover; border-radius: 9px; }
+html.kr-md #threads .thread { position: relative; }
+html.kr-md #threads .threadpost .post-head > :not(.title), html.kr-md #threads .threadpost .post-head .kr-untitled,
+html.kr-md #threads .threadpost .quote .text-button { display: none !important; }
+html.kr-md #threads .threadpost .post-head .title { display: block; margin: 0 56px 2px 0; color: var(--kr-text) !important; font: 600 15px/1.35 var(--kr-font); }
+html.kr-md .kr-when { position: absolute; top: 13px; right: 14px; font-size: 12px; color: var(--kr-text3); }
+html.kr-md #threads .post-head .name, html.kr-md #threads .post-head .now { color: var(--kr-text2) !important; font-weight: 400; }
+html.kr-md #threads .post-head .qlink { color: var(--kr-text3) !important; }
+html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  margin: 0 56px 0 0; font-size: 14px; line-height: 1.55; color: var(--kr-text) !important; }
+html.kr-md #threads .threadpost .post-head .kr-untitled + * { margin-top: 0; }
+html.kr-md .kr-site-scroll { right: calc(var(--kr-drawer-w) + 10px) !important; }
+html.kr-md #threads .thread.kr-peek .post.reply { display: block; margin: 8px 0 0 84px; padding: 8px 10px; border-radius: 10px; background: var(--kr-fill) !important; font-size: 13px; }
+html.kr-md .kr-meta { clear: both; display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
+html.kr-md .kr-meta button { border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
+html.kr-md #page_switch { max-width: 980px; margin: 16px auto; font-size: 13px; color: var(--kr-text2); }
+html.kr-md #page_switch a { display: inline-block; margin: 2px; padding: 4px 10px; border-radius: 999px; background: var(--kr-fill); text-decoration: none; }
 
-/* the site's form, floating; collapsed it is a pill (board) or a bar (thread) */
-html.kr .kr-composer { position: fixed; z-index: 9001; right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; margin: 0; background: var(--kr-bg); color: inherit;
-  border: 1px solid var(--kr-line); border-radius: 16px; box-shadow: 0 10px 32px rgba(0, 0, 0, .2); }
-html.kr .kr-composer #postform { padding: 4px 12px 12px; }
-/* folded: clipped, not display:none, so the Turnstile frame keeps running; absolute so the hidden
-   table does not widen the pill */
+/* the site's own form, floating; never moved, never display:none (Turnstile lives in it) */
+html.kr .kr-composer { position: fixed; z-index: 9001; right: 16px; bottom: 16px; width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  overflow: auto; box-sizing: border-box; margin: 0; background: var(--kr-glass) !important; color: var(--kr-text) !important; font-family: var(--kr-font);
+  backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: .5px solid var(--kr-sep); border-radius: 16px; box-shadow: var(--kr-shadow); }
+html.kr .kr-composer #postform { padding: 0 12px 12px; background: none !important; }
 html.kr .kr-composer[data-kr-state="collapsed"] #postform { position: absolute; left: 0; width: 440px; max-height: 0; padding: 0; overflow: hidden; }
-html.kr .kr-composer #postinfo .post-notices, html.kr .kr-composer #postinfo .post-instructions,
-html.kr .kr-composer .bar_reply, html.kr-embed .kr-composer .kr-backlink { display: none; }
-html.kr .kr-composer #postform_tbl { width: 100%; margin: 0 !important; }
-html.kr .kr-composer #postform_tbl td.Form_bg { width: 5em; white-space: nowrap; }
-html.kr .kr-composer #fcom { width: 100% !important; height: 9em !important; box-sizing: border-box; resize: vertical; font: inherit; }
-html.kr .kr-composer #fname, html.kr .kr-composer #fsub, html.kr .kr-composer input[name="category"] { width: 70%; box-sizing: border-box; }
-html.kr .kr-composer-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--kr-bg); }
-html.kr .kr-composer-toggle { flex: 1; min-height: 28px; padding: 0; border: 0; background: none; color: inherit; font: inherit;
-  font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
-html.kr .kr-composer-close { display: none; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: inherit;
-  font-size: 20px; line-height: 1; cursor: pointer; }
+html.kr .kr-composer #postinfo .post-notices, html.kr .kr-composer #postinfo .post-instructions, html.kr .kr-composer .bar_reply { display: none; }
+html.kr .kr-composer #postform_tbl { width: 100%; margin: 0 !important; border-collapse: separate; border-spacing: 0 4px; }
+html.kr .kr-composer #postform_tbl td { padding: 0 4px; border: 0 !important; background: none !important; color: var(--kr-text2) !important; font-size: 12px; vertical-align: middle; }
+html.kr .kr-composer #postform_tbl td.Form_bg { width: 4.5em; white-space: nowrap; }
+html.kr .kr-composer #postform_tbl td.Form_bg b { font-weight: 500; }
+html.kr .kr-composer input[type="text"], html.kr .kr-composer textarea { box-sizing: border-box; padding: 6px 9px; border: .5px solid var(--kr-sep);
+  border-radius: 8px; background: var(--kr-bg) !important; color: var(--kr-text) !important; font: 14px var(--kr-font); }
+html.kr .kr-composer #fcom { width: 100% !important; height: 8.5em !important; resize: vertical; line-height: 1.5; }
+html.kr .kr-composer #fname, html.kr .kr-composer #fsub, html.kr .kr-composer input[name="category"] { width: 72%; }
+html.kr .kr-composer input[type="submit"] { height: 28px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--kr-accent); color: #fff;
+  font: 600 13px var(--kr-font); cursor: pointer; }
+html.kr .kr-composer-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+html.kr .kr-composer-toggle { flex: 1; min-height: 26px; padding: 0; border: 0; background: none; color: var(--kr-text); font: 600 14px var(--kr-font);
+  text-align: left; cursor: pointer; }
+html.kr .kr-composer-close { display: none; width: 28px; height: 28px; border: 0; border-radius: 999px; background: var(--kr-fill); color: var(--kr-text);
+  font-size: 17px; line-height: 1; cursor: pointer; }
 html.kr .kr-composer[data-kr-state="expanded"] .kr-composer-close { display: block; }
-html.kr .kr-composer-close:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
-html.kr-top .kr-composer.kr-new[data-kr-state="collapsed"] { width: auto; border-radius: 999px; }
-html.kr .kr-composer.kr-reply { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: 820px; margin: 0 auto; }
-html.kr .kr-composer.kr-reply[data-kr-state="expanded"] { max-height: 75vh; }
-html.kr .kr-composer.kr-reply[data-kr-state="collapsed"] .kr-composer-toggle { font-weight: 400; opacity: .75; }
-html.kr body.kr-has-reply { padding-bottom: 88px; }
+html.kr .kr-composer-status { padding: 0 14px 10px; font-size: 12px; color: var(--kr-text2); white-space: pre-wrap; }
+html.kr .kr-composer-status:empty { display: none; }
+html.kr .kr-composer-status.kr-error { color: #ff453a; }
+html.kr-md .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
+html.kr-md .kr-composer.kr-new[data-kr-state="collapsed"] { width: auto; border-radius: 999px; }
+html.kr-md .kr-composer.kr-reply-pane { right: 12px; bottom: 12px; width: calc(var(--kr-drawer-w) - 24px); }
+html.kr-md .kr-composer.kr-reply-pane[data-kr-state="expanded"] { max-height: 70vh; }
+html.kr-md .kr-composer.kr-reply-pane[data-kr-state="collapsed"] .kr-composer-toggle { font-weight: 400; color: var(--kr-text2); }
+html.kr-thread .kr-composer.kr-reply { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: 820px; margin: 0 auto; }
+html.kr-thread .kr-composer.kr-reply[data-kr-state="expanded"] { max-height: 75vh; }
+html.kr-thread body { padding-bottom: 88px !important; }
 
-/* drawer: the thread page in a same-origin frame, beside the board */
-html.kr .kr-drawer { position: fixed; z-index: 9000; top: 0; right: 0; bottom: 0; width: var(--kr-drawer-w); display: flex;
-  flex-direction: column; box-sizing: border-box; background: var(--kr-bg); color: inherit; border-left: 1px solid var(--kr-line);
-  box-shadow: -10px 0 30px rgba(0, 0, 0, .14); transform: translateX(100%); visibility: hidden; transition: transform .18s ease, visibility .18s; }
-html.kr.kr-drawer-open .kr-drawer { transform: none; visibility: visible; }
-html.kr-docked .kr-drawer { transform: none; visibility: visible; transition: none; }
-html.kr-docked body { margin-left: var(--kr-side); margin-right: var(--kr-drawer-w); }
-html.kr-docked .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
-html.kr .kr-drawer-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--kr-line); font-size: 14px; }
-html.kr .kr-drawer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 15px; }
-html.kr .kr-drawer-head a, html.kr .kr-drawer-head button { flex: none; padding: 4px 10px; border: 1px solid var(--kr-line); border-radius: 8px;
-  background: none; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
-html.kr .kr-drawer-head .kr-drawer-close { width: 34px; padding: 4px 0; border: 0; font-size: 20px; line-height: 1; }
-html.kr .kr-drawer-head a:hover, html.kr .kr-drawer-head button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
-html.kr .kr-drawer-frame { flex: 1; width: 100%; border: 0; background: var(--kr-bg); }
-html.kr-md .kr-drawer-frame { display: none; }
-html.kr-md.kr-drawer-open .kr-drawer-frame { display: block; }
-html.kr .kr-drawer-empty { flex: 1; display: grid; align-content: center; gap: 12px; padding: 24px; text-align: center; }
-html.kr .kr-drawer-empty small { opacity: .65; }
-html.kr.kr-drawer-open .kr-drawer-empty { display: none; }
-html.kr .kr-drawer-back { display: none; }
-html.kr-md:not(.kr-drawer-open) .kr-drawer-reload, html.kr-md:not(.kr-drawer-open) .kr-drawer-newtab { display: none; }
-html.kr .kr-drawer-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
+/* detail pane: the thread, fetched and drawn here */
+html.kr .kr-pane { position: fixed; z-index: 55; top: 0; right: 0; bottom: 0; width: var(--kr-drawer-w); display: flex; flex-direction: column;
+  box-sizing: border-box; background: var(--kr-bg); color: var(--kr-text); border-left: .5px solid var(--kr-sep); font-family: var(--kr-font); }
+html.kr .kr-pane-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 12px 8px 16px; box-sizing: border-box;
+  background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%); border-bottom: .5px solid var(--kr-sep); }
+html.kr .kr-pane-titles { flex: 1; min-width: 0; }
+html.kr .kr-pane-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/1.3 var(--kr-font); }
+html.kr .kr-pane-sub { font-size: 12px; color: var(--kr-text2); }
+html.kr .kr-pane-body { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 8px 20px 120px; }
+html.kr .kr-pane-empty { flex: 1; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--kr-text2); font-size: 14px; }
+html.kr .kr-pane-empty small { color: var(--kr-text3); font-size: 12px; }
+html.kr.kr-pane-open .kr-pane-empty, html.kr:not(.kr-pane-open) .kr-pane-body, html.kr:not(.kr-pane-open) .kr-pane-actions { display: none; }
+html.kr .kr-pane-actions { display: flex; gap: 6px; }
+html.kr .kr-pane-back { display: none; }
+html.kr .kr-pane-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
 html.kr.kr-resizing, html.kr.kr-resizing * { cursor: col-resize !important; user-select: none !important; }
-html.kr.kr-resizing .kr-drawer-frame { pointer-events: none; }
-html.kr .kr-side { position: fixed; z-index: 8999; inset: 0 auto 0 0; width: 248px; box-sizing: border-box; display: flex;
-  flex-direction: column; background: var(--kr-bg); color: inherit; border-right: 1px solid var(--kr-line); font: 14px/1.4 system-ui, -apple-system, "PingFang TC", sans-serif; }
-html.kr .kr-side-head { position: sticky; top: 0; z-index: 1; padding: 10px; background: var(--kr-bg); border-bottom: 1px solid var(--kr-line); }
-html.kr .kr-side-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 17px; }
+html.kr .kr-post { padding: 14px 0; border-bottom: .5px solid var(--kr-sep); }
+html.kr .kr-post:last-of-type { border-bottom: 0; }
+html.kr .kr-post-title { margin: 6px 0 8px; font: 700 21px/1.3 var(--kr-font); color: var(--kr-text); }
+html.kr .kr-post-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 6px; font-size: 12px; color: var(--kr-text2); }
+html.kr .kr-post-name { font-weight: 600; color: var(--kr-text); }
+html.kr .kr-post-id { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+html.kr .kr-post-no { margin-left: auto; padding: 0; border: 0; background: none; color: var(--kr-text3); font: inherit; cursor: pointer; }
+html.kr .kr-post-no:hover { color: var(--kr-accent); }
+html.kr .kr-post-text { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
+html.kr .kr-post-op .kr-post-text { font-size: 16px; }
+html.kr .kr-post-text a { color: var(--kr-accent); text-decoration: none; }
+html.kr .kr-post-text a:hover { text-decoration: underline; }
+html.kr .kr-post-text .resquote, html.kr .kr-post-text .unkfunc { color: var(--kr-text2); }
+html.kr .kr-post-media { position: relative; display: inline-block; max-width: 100%; margin: 4px 0 8px; }
+html.kr .kr-post-media img, html.kr .kr-post-media video { display: block; max-width: 100%; max-height: 70vh; width: auto; height: auto;
+  border-radius: 10px; background: var(--kr-fill); }
+html.kr .kr-post-media img { cursor: zoom-in; }
+html.kr .kr-post-file { margin-top: 4px; font-size: 11px; color: var(--kr-text3); }
+html.kr .kr-spoiler img, html.kr .kr-spoiler video { filter: blur(28px) saturate(.6); pointer-events: none; }
+html.kr .kr-spoiler-btn { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 10px; background: rgba(0, 0, 0, .25); color: #fff;
+  font: 600 13px var(--kr-font); cursor: pointer; }
+html.kr .kr-post-media:not(.kr-spoiler) .kr-spoiler-btn { display: none; }
+html.kr .kr-backlinks { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
+html.kr .kr-backlinks a { color: var(--kr-accent); text-decoration: none; }
+html.kr .kr-loading, html.kr .kr-pane-error { padding: 18px 0; font-size: 13px; color: var(--kr-text2); }
+html.kr .kr-pane-error { color: #ff453a; }
+html.kr .kr-pane-error .kr-btn { margin: 10px 8px 0 0; }
+html.kr .kr-preview { position: fixed; z-index: 10000; width: min(440px, 90vw); max-height: 52vh; overflow: hidden; padding: 4px 16px; box-sizing: border-box;
+  border-radius: 12px; background: var(--kr-glass); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: .5px solid var(--kr-sep); box-shadow: var(--kr-shadow); color: var(--kr-text); font-family: var(--kr-font); pointer-events: none; }
+html.kr .kr-preview[hidden] { display: none; }
+html.kr .kr-preview .kr-post { border: 0; }
+html.kr .kr-preview img, html.kr .kr-preview video { max-height: 180px; }
+html.kr .kr-lightbox { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; background: rgba(0, 0, 0, .85); cursor: zoom-out; }
+html.kr .kr-lightbox img { max-width: 96vw; max-height: 94vh; border-radius: 8px; }
+html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
+@keyframes kr-flash { from { background: color-mix(in srgb, var(--kr-accent) 22%, transparent); } to { background: transparent; } }
+
+/* sidebar: to the window edge, translucent, accent selection */
+/* stacking: list toolbar 50 < sidebar 51 < its ☰ 52 < pane 55 < form 9001 */
+html.kr .kr-side { position: fixed; z-index: 51; inset: 0 auto 0 0; width: 248px; box-sizing: border-box; display: flex; flex-direction: column;
+  background: var(--kr-glass); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-right: .5px solid var(--kr-sep); color: var(--kr-text); font: 13px/1.35 var(--kr-font); }
+html.kr .kr-side-head { padding: 12px 10px 6px; }
+html.kr .kr-side-title { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; font: 700 13px var(--kr-font); color: var(--kr-text2); }
 html.kr .kr-side button { color: inherit; cursor: pointer; font: inherit; }
-html.kr .kr-side-close, html.kr .kr-side-open { border: 0; background: transparent; border-radius: 6px; }
-html.kr .kr-side-close { width: 30px; height: 30px; font-size: 20px; }
-html.kr .kr-side-search { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 7px 9px; background: var(--kr-bg); color: inherit;
-  border: 1px solid var(--kr-line); border-radius: 8px; font: inherit; }
-html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 8px 6px 16px; }
-html.kr .kr-side-group { margin-bottom: 6px; }
-html.kr .kr-side-group-toggle { width: 100%; padding: 8px 7px 5px; border: 0; background: none; text-align: left;
-  font-size: 12px !important; font-weight: 700 !important; letter-spacing: .06em; opacity: .65; }
-html.kr .kr-side-row { display: flex; align-items: center; min-height: 32px; border-radius: 6px; }
-html.kr .kr-side-row:hover, html.kr .kr-side-row[aria-current="page"] { background: color-mix(in srgb, currentColor 10%, transparent); }
-html.kr .kr-side-row > a { flex: 1; min-width: 0; padding: 5px 6px 5px 10px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; text-decoration: none; color: inherit; }
-html.kr .kr-side-star { flex: none; width: 28px; min-height: 28px; border: 0; background: none; }
-html.kr .kr-side-down { opacity: .5; }
-html.kr .kr-side-tag { flex: none; font-size: 10px; padding-right: 3px; }
-html.kr .kr-side-gate { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 8px; }
+html.kr .kr-side-close { width: 26px; height: 26px; border: 0; border-radius: 7px; background: none; font-size: 17px; color: var(--kr-text2); }
+html.kr .kr-side-close:hover { background: var(--kr-fill); }
+html.kr .kr-side-search { width: 100%; box-sizing: border-box; padding: 6px 10px 6px 28px; border: 0; border-radius: 8px; background-color: var(--kr-fill);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 9px 50%; color: var(--kr-text); font: 13px var(--kr-font); outline: none; }
+html.kr .kr-side-search:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kr-accent) 40%, transparent); }
+html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 16px; }
+html.kr .kr-side-group { margin-bottom: 4px; }
+html.kr .kr-side-group-toggle { width: 100%; padding: 10px 6px 4px; border: 0; background: none; text-align: left; font-size: 11px !important;
+  font-weight: 600 !important; color: var(--kr-text2) !important; }
+html.kr .kr-side-row { display: flex; align-items: center; min-height: 28px; margin: 1px 0; border-radius: 7px; }
+html.kr .kr-side-row:hover { background: var(--kr-fill); }
+html.kr .kr-side-row[aria-current="page"] { background: var(--kr-accent); }
+html.kr .kr-side-row > a { flex: 1; min-width: 0; padding: 4px 6px 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-decoration: none; color: var(--kr-text) !important; }
+html.kr .kr-side-row[aria-current="page"] > a, html.kr .kr-side-row[aria-current="page"] .kr-side-star, html.kr .kr-side-row[aria-current="page"] .kr-side-tag { color: #fff !important; }
+html.kr .kr-side-star { flex: none; width: 26px; min-height: 26px; border: 0; background: none; color: var(--kr-text3); opacity: 0; }
+html.kr .kr-side-row:hover .kr-side-star, html.kr .kr-side-star[aria-pressed="true"] { opacity: 1; }
+html.kr .kr-side-star[aria-pressed="true"] { color: #ff9f0a; }
+html.kr .kr-side-down > a { color: var(--kr-text3) !important; }
+html.kr .kr-side-tag { flex: none; padding-right: 2px; font-size: 10px; color: var(--kr-text3); }
+html.kr .kr-side-gate { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 6px 8px; }
 html.kr .kr-side-gate[hidden] { display: none; }
-html.kr .kr-side-gate input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--kr-line); border-radius: 6px;
-  background: var(--kr-bg); color: inherit; font: inherit; }
-html.kr .kr-side-gate button { padding: 5px 10px; border: 1px solid var(--kr-line); border-radius: 6px; background: none; }
-html.kr .kr-side-gate-error { flex-basis: 100%; font-size: 12px; color: #c00; }
+html.kr .kr-side-gate input { flex: 1; min-width: 0; padding: 5px 8px; border: 0; border-radius: 7px; background: var(--kr-fill); color: inherit; font: inherit; }
+html.kr .kr-side-gate button { padding: 5px 12px; border: 0; border-radius: 999px; background: var(--kr-accent); color: #fff; }
+html.kr .kr-side-gate-error { flex-basis: 100%; font-size: 12px; color: #ff453a; }
 html.kr .kr-side-gate-error:empty { display: none; }
-html.kr .kr-side-open { display: none; position: fixed; z-index: 9000; top: 5px; left: 5px; width: 30px; height: 30px;
-  border: 1px solid var(--kr-line); background: var(--kr-bg); color: inherit; cursor: pointer; }
+html.kr .kr-side-open { display: none; position: fixed; z-index: 52; top: 11px; left: 10px; width: 30px; height: 30px; border: .5px solid var(--kr-sep);
+  border-radius: 8px; background: var(--kr-glass); backdrop-filter: blur(20px); color: var(--kr-text); cursor: pointer; }
 html.kr.kr-side-hidden .kr-side { display: none; }
 html.kr.kr-side-hidden .kr-side-open { display: block; }
-html.kr-portal body { margin: 0; }
+html.kr-md.kr-side-hidden .kr-toolbar { padding-left: 52px; }
+html.kr-portal body { margin: 0; background: var(--kr-bg); }
 html.kr-portal body > :not(.kr-side):not(.kr-side-open) { display: none !important; }
-html.kr-portal.kr-side-hidden .kr-side-open { display: block; }
+html.kr-portal .kr-side { border-right: 0; }
+
 @media (max-width: 899px) {
-  html.kr-md .kr-side { box-shadow: 8px 0 24px rgba(0, 0, 0, .2); }
+  html.kr-md body { margin: 0 !important; padding: 0 12px 24px !important; }
+  html.kr .kr-toolbar { margin: 0 -12px 10px; padding: 10px 12px 10px 52px; }
+  html.kr-md .kr-side { box-shadow: var(--kr-shadow); }
   html.kr-md:not(.kr-side-overlay) .kr-side { display: none; }
   html.kr-md:not(.kr-side-overlay) .kr-side-open { display: block; }
   html.kr-md.kr-side-overlay .kr-side { display: flex; }
   html.kr-md.kr-side-overlay .kr-side-open { display: none; }
-  html.kr .kr-drawer { width: 100vw; }
-  html.kr-md.kr-drawer-open body { overflow: hidden; }
-  html.kr-md.kr-drawer-open .kr-composer.kr-new { right: 16px; }
-  html.kr-md .kr-drawer-back { display: block; }
-  html.kr-md .kr-drawer-close { display: none; }
-  html.kr .kr-drawer-resize { display: none; }
+  html.kr .kr-pane { width: 100vw; border-left: 0; transform: translateX(100%); visibility: hidden; transition: transform .22s ease, visibility .22s; }
+  html.kr.kr-pane-open .kr-pane { transform: none; visibility: visible; }
+  html.kr.kr-pane-open body { overflow: hidden; }
+  html.kr .kr-pane-back { display: inline-flex; }
+  html.kr .kr-pane-close, html.kr .kr-pane-resize { display: none; }
+  html.kr-md .kr-composer.kr-new { right: 16px; }
+  html.kr-md .kr-composer.kr-reply-pane { left: 12px; right: 12px; width: auto; }
+  html.kr-md #threads .thread.kr-peek .post.reply { margin-left: 0; }
 }
-
-/* inside the drawer only the thread and the reply form are left */
-html.kr-embed #header, html.kr-embed #board-post-divider-start, html.kr-embed #board-post-transition, html.kr-embed #board-post-divider-end,
-html.kr-embed #footer, html.kr-embed #page_switch, html.kr-embed #mobile-ad, html.kr-embed #web-ad { display: none !important; }
-html.kr-embed body { margin: 0; padding: 12px 12px 96px; }
-html.kr-embed #threads .thread { border: 0; padding: 0; background: none; }
-html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
-@keyframes kr-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 50%, transparent); } to { box-shadow: 0 0 0 3px transparent; } }
 `;
 
   const el = (tag, attrs = {}, text) => {
@@ -640,7 +738,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       if (board.c === '外部連結') link.rel = 'noopener';
       if (board.s === 'down') {
         link.title = `上次檢查 ${BOARDS_AT} 連不上`;
-        node.append(el('span', { class: 'kr-side-tag', title: link.title }, '連不上'));
+        node.dataset.tag = '連不上';
       }
       if (current && normalizeBoardUrl(current.u) === normalizeBoardUrl(board.u)) {
         node.setAttribute('aria-current', 'page');
@@ -659,7 +757,9 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
         store.set('kr.stars', stars);
         render();
       });
-      node.append(link, star);
+      node.append(link);
+      if (node.dataset.tag) node.append(el('span', { class: 'kr-side-tag', title: link.title }, node.dataset.tag));
+      node.append(star);
       return node;
     };
     // the portal locks its 18禁 section behind a birth-year question; the sidebar asks the same question
@@ -775,24 +875,23 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
   }
 
   function syncTheme() {
-    const colors = [document.body, root].filter(Boolean).map((n) => getComputedStyle(n).backgroundColor);
-    root.style.setProperty('--kr-bg', opaqueColor(colors, '#fff'));
+    const select = document.getElementById('theme-selector');
+    const link = document.querySelector('link.second-style');
+    const siteDark = select ? select.value === 'dark.css' : /dark/i.test(link?.getAttribute('href') || '');
+    const siteChose = select ? select.value !== '' : false;
+    const dark = siteChose ? siteDark : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.toggleAttribute('data-kr-dark', dark);
   }
 
   function watchTheme() {
     syncTheme();
-    window.addEventListener('load', syncTheme, { once: true });
-    document.getElementById('theme-selector')?.addEventListener('change', () => setTimeout(syncTheme, 150));
-    const link = document.querySelector('link.second-style');
-    if (link) {
-      new MutationObserver(() => setTimeout(syncTheme, 150)).observe(link, { attributes: true, attributeFilter: ['href'] });
-      link.addEventListener('load', syncTheme);
-    }
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme);
+    document.getElementById('theme-selector')?.addEventListener('change', () => setTimeout(syncTheme, 50));
   }
 
-  // ---- composer: the site's own #postform_main, made to float. It is never moved or cloned:
-  // moving the node would reload the Turnstile frame and drop its token.
-  const composer = { form: null, resto: null };
+  // ---- composer: the site's own #postform_main, made to float. It is never moved, cloned or display:none'd:
+  // the Turnstile frame inside it would reload and drop its token.
+  const composer = { form: null, resto: null, restoInput: null, mode: 'new', target: null, posting: false, sent: '', category: '' };
 
   function setupComposer() {
     const form = document.getElementById('postform_main');
@@ -801,46 +900,143 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     composer.form = form;
     composer.resto = resto;
     form.classList.add('kr-composer', resto ? 'kr-reply' : 'kr-new');
-    if (resto) document.body.classList.add('kr-has-reply');
 
     const bar = el('div', { class: 'kr-composer-bar' });
     const toggle = el('button', { type: 'button', class: 'kr-composer-toggle', 'aria-expanded': 'false' });
     const close = el('button', { type: 'button', class: 'kr-composer-close', 'aria-label': '收起', title: '收起（Esc）' }, '×');
     bar.append(toggle, close);
     form.insertBefore(bar, form.firstChild);
+    form.append(el('div', { class: 'kr-composer-status', role: 'status' }));
 
-    // "[回到版面]" would turn the drawer into the board; wrap it, brackets included, so CSS can drop it there
-    const back = form.querySelector('#postform > a[href^="index.htm"]');
-    if (back) {
-      const wrap = el('span', { class: 'kr-backlink' });
-      const prev = back.previousSibling;
-      const next = back.nextSibling;
-      back.before(wrap);
-      if (prev?.nodeType === 3 && prev.data.endsWith('[')) {
-        prev.data = prev.data.slice(0, -1);
-        wrap.append('[');
-      }
-      wrap.append(back);
-      if (next?.nodeType === 3 && next.data.startsWith(']')) {
-        next.data = next.data.slice(1);
-        wrap.append(']');
-      }
-    }
-
-    toggle.addEventListener('click', () => (form.dataset.krState === 'expanded' && !resto ? collapse() : expand(true)));
+    toggle.addEventListener('click', () => (form.dataset.krState === 'expanded' && composer.mode === 'new' && !resto ? collapse() : expand(true)));
     close.addEventListener('click', collapse);
     form.addEventListener('focusin', (e) => {
       if (!bar.contains(e.target)) expand(false);
     });
+
+    if (!resto) {
+      // replying from the board page: the site's own Quick Reply posts the same form with a resto field
+      composer.restoInput = el('input', { type: 'hidden', name: 'resto', value: '', disabled: '' });
+      form.append(composer.restoInput);
+      composer.category = form.querySelector('input[name="category"]')?.value || '';
+      // results land in a hidden frame so the board and the open thread stay where they are
+      const sink = el('iframe', { name: 'kr-sink', title: '發文結果', hidden: '' });
+      document.body.append(sink);
+      form.target = 'kr-sink';
+      // formdata fires only once the site's own submit checks have let the post through
+      form.addEventListener('formdata', () => {
+        composer.posting = true;
+        composer.sent = document.getElementById('fcom')?.value || '';
+        setStatus('送出中⋯');
+      });
+      sink.addEventListener('load', () => onPosted(sink));
+    }
     collapse();
   }
 
+  function setStatus(text, error = false) {
+    const status = composer.form?.querySelector('.kr-composer-status');
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle('kr-error', error);
+  }
+
+  function resetTurnstile() {
+    try {
+      const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      page.turnstile?.reset();
+    } catch {
+      /* no widget on this board */
+    }
+  }
+
+  function onPosted(sink) {
+    if (!composer.posting) return;
+    let doc = null;
+    try {
+      doc = sink.contentDocument;
+    } catch {
+      doc = null;
+    }
+    const scripts = [...(doc?.scripts || [])].map((n) => n.textContent).join('\n');
+    const outcome = postOutcome({
+      readable: !!doc?.body,
+      threads: !!doc?.getElementById('threads'),
+      redirect: !!doc?.querySelector('meta[http-equiv="refresh" i]') || /location\s*\.\s*(href|replace|assign)|window\.location\s*=/.test(scripts),
+      text: doc?.body?.innerText || '',
+    });
+    if (outcome.kind === 'wait') return;
+    composer.posting = false;
+    resetTurnstile();
+    if (outcome.kind === 'ok') {
+      posted();
+      return;
+    }
+    // no verdict from the page: in a thread, the thread itself shows whether the reply landed
+    const probe = postedProbe(composer.sent);
+    const unsure = () =>
+      // the text stays in the box: nothing is cleared unless the post is confirmed
+      setStatus(`看不出有沒有送出（${outcome.message}）。內容還在框裡，請按 ↻ 或在新分頁確認。`, true);
+    if (composer.mode === 'reply' && composer.target && probe) {
+      const res = composer.target;
+      loadThread(res, true).then(
+        (posts) => (posts.some((p) => (p.quote?.textContent || '').includes(probe)) ? posted() : unsure()),
+        unsure,
+      );
+    } else {
+      unsure();
+    }
+  }
+
+  function posted() {
+    setStatus('已送出');
+    const ta = document.getElementById('fcom');
+    if (ta) ta.value = '';
+    const file = document.getElementById('fupfile');
+    if (file) file.value = '';
+    collapse();
+    if (composer.mode === 'reply' && composer.target) openThread(composer.target, { fresh: true });
+    else location.reload();
+  }
+
   function setLabel() {
-    const { form, resto } = composer;
+    const { form, resto, mode, target } = composer;
     const toggle = form.querySelector('.kr-composer-toggle');
     const open = form.dataset.krState === 'expanded';
-    toggle.textContent = resto ? (open ? `回覆 No.${resto}` : `✎ 回覆 No.${resto}⋯（點任一則的 No. 可引用）`) : '✎ 發新串';
+    const no = resto || (mode === 'reply' ? target : null);
+    toggle.textContent = no ? (open ? `回覆 No.${no}` : `✎ 回覆 No.${no}⋯　點任一則的 No. 可引用`) : open ? '發新串' : '✎ 發新串';
     toggle.setAttribute('aria-expanded', String(open));
+  }
+
+  function composerReply(res) {
+    const { form, restoInput } = composer;
+    if (!form || !restoInput) return;
+    if (composer.mode !== 'reply' || composer.target !== res) setStatus('');
+    composer.mode = 'reply';
+    composer.target = res;
+    restoInput.value = String(res);
+    restoInput.disabled = false;
+    // the site's Quick Reply clears the board's default category for replies on /00b/
+    const category = form.querySelector('input[name="category"]');
+    if (category) category.value = '';
+    form.classList.add('kr-reply-pane');
+    form.classList.remove('kr-new');
+    setLabel();
+  }
+
+  function composerNew() {
+    const { form, restoInput } = composer;
+    if (!form || !restoInput) return;
+    if (composer.mode !== 'new') setStatus('');
+    composer.mode = 'new';
+    composer.target = null;
+    restoInput.value = '';
+    restoInput.disabled = true;
+    const category = form.querySelector('input[name="category"]');
+    if (category && !category.value) category.value = composer.category;
+    form.classList.add('kr-new');
+    form.classList.remove('kr-reply-pane');
+    setLabel();
   }
 
   function expand(focus) {
@@ -871,16 +1067,7 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     return true;
   }
 
-  function flashPost(no) {
-    const post = document.getElementById(`r${no}`);
-    if (!post) return;
-    post.scrollIntoView({ block: 'center' });
-    post.classList.remove('kr-flash');
-    void post.offsetWidth;
-    post.classList.add('kr-flash');
-  }
-
-  // No. in a post head: the site opens its own quick-reply box there. Quote into the floating form instead.
+  // No. in a post head on the site's own pages: the site opens its quick-reply box there. Quote into the floating form instead.
   function onHeadNumber(e, handle) {
     const q = e.target.closest?.('.post-head .qlink');
     if (!q || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -893,24 +1080,170 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     handle(no, op);
   }
 
-  // ---- drawer (top-level board page)
-  function setupDrawer() {
-    const drawer = el('aside', { class: 'kr-drawer', 'aria-label': '討論串' });
-    const resize = el('div', { class: 'kr-drawer-resize', title: '拖曳調整寬度' });
-    const head = el('header', { class: 'kr-drawer-head' });
-    const back = el('button', { type: 'button', class: 'kr-drawer-back' }, '‹ 列表');
-    const title = el('span', { class: 'kr-drawer-title' });
-    const newtab = el('a', { class: 'kr-drawer-newtab', target: '_blank', rel: 'noopener' }, '新分頁');
-    const reload = el('button', { type: 'button', class: 'kr-drawer-reload', title: '重新載入這串' }, '重新整理');
-    const close = el('button', { type: 'button', class: 'kr-drawer-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
-    const frame = el('iframe', { class: 'kr-drawer-frame', name: FRAME_NAME, title: '討論串內容' });
-    const empty = el('div', { class: 'kr-drawer-empty' });
-    empty.append(el('span', {}, '← 點左邊任一串，在這裡看全部回應'), el('small', {}, 'j／k 上下切換 · Enter 開啟 · Esc 取消選取'));
-    head.append(back, title, newtab, reload, close);
-    drawer.append(resize, head, frame, empty);
-    document.body.appendChild(drawer);
+  // ---- reading a thread out of the site's markup: a board card, or a thread page fetched in the background
+  function readPosts(thread) {
+    return [...thread.querySelectorAll('.post[data-no]')].map((post) => {
+      const head = post.querySelector('.post-head');
+      const headText = head?.textContent || '';
+      const holder = post.querySelector('.md5-image[data-image-original]');
+      const fileLink = post.querySelector('.file-text a[href]');
+      const src = holder?.getAttribute('data-image-original') || fileLink?.getAttribute('href') || '';
+      const info = (post.querySelector('.file-text')?.textContent || '').replace(/^\s*檔名[:：]\s*/, '').trim();
+      return {
+        no: Number(post.getAttribute('data-no')),
+        op: post.classList.contains('threadpost'),
+        title: head?.querySelector('.title')?.textContent.trim() || '',
+        name: head?.querySelector('.name')?.textContent.trim() || '',
+        time: shortTime(head?.querySelector('.now')?.textContent || '', new Date()) || '',
+        // the site moves the ID out of .now into .id[data-id] once its script runs; a fetched page still has it in .now
+        id: head?.querySelector('.id')?.getAttribute('data-id') || /ID:\s*([A-Za-z0-9./+]+)/.exec(head?.querySelector('.now')?.textContent || headText)?.[1] || '',
+        media: src
+          ? {
+              src,
+              thumb: holder?.getAttribute('data-image-thumb') || post.querySelector('.file-thumb img')?.getAttribute('src') || '',
+              kind: mediaKind(src),
+              dims: fileDims(info),
+              info,
+              spoiler: !!post.querySelector('.media-spoiler'),
+            }
+          : null,
+        quote: post.querySelector('.quote'),
+      };
+    });
+  }
 
-    const d = (state.drawer = { el: drawer, frame, title, newtab, res: null, loading: null, ready: false, pending: [] });
+  // post text is user content: only the markup a post needs survives the copy
+  function cleanQuote(quote) {
+    const q = quote.cloneNode(true);
+    for (const n of q.querySelectorAll('script, style, iframe, object, embed, form, input, button, .postvote-slot, .backquote, .-expand-line, .text-button, .kr-meta')) n.remove();
+    for (const n of q.querySelectorAll('.hide')) n.replaceWith(...n.childNodes);
+    for (const n of q.querySelectorAll('*')) {
+      for (const a of [...n.attributes]) if (/^on/i.test(a.name) || a.name === 'style' || a.name === 'id') n.removeAttribute(a.name);
+      if (/^\s*(javascript|data|vbscript):/i.test(n.getAttribute('href') || '')) n.removeAttribute('href');
+      if (/^\s*(javascript|vbscript):/i.test(n.getAttribute('src') || '')) n.removeAttribute('src');
+    }
+    while (q.lastChild && (q.lastChild.nodeName === 'BR' || (q.lastChild.nodeType === 3 && !q.lastChild.data.trim()))) q.lastChild.remove();
+    return q;
+  }
+
+  function renderMedia(m) {
+    const box = el('div', { class: `kr-post-media${m.spoiler ? ' kr-spoiler' : ''}` });
+    let node;
+    if (m.kind === 'video') {
+      node = el('video', { controls: '', preload: 'metadata', playsinline: '', src: m.src });
+      if (m.thumb) node.poster = m.thumb;
+    } else {
+      node = el('img', { src: m.src, alt: '', loading: 'lazy', decoding: 'async' });
+      node.dataset.full = m.src;
+      // the board syncs uploads to its image host in the background: until then only the thumbnail exists
+      if (m.thumb) node.addEventListener('error', () => node.getAttribute('src') !== m.thumb && node.setAttribute('src', m.thumb), { once: true });
+    }
+    if (m.dims) {
+      node.setAttribute('width', String(m.dims.w));
+      node.setAttribute('height', String(m.dims.h));
+    }
+    box.append(node);
+    if (m.spoiler) box.append(el('button', { type: 'button', class: 'kr-spoiler-btn' }, '發文者標了防雷・點一下顯示'));
+    if (m.info) box.append(el('div', { class: 'kr-post-file' }, m.info));
+    return box;
+  }
+
+  function renderPosts(res, posts, note) {
+    const pane = state.pane;
+    const byNo = new Set(posts.map((p) => p.no));
+    const backs = new Map();
+    const articles = posts.map((p) => {
+      const art = el('article', { class: `kr-post${p.op ? ' kr-post-op' : ''}`, id: `kr-p${p.no}`, 'data-no': String(p.no) });
+      if (p.op && p.title && p.title !== '無題') art.append(el('h2', { class: 'kr-post-title' }, p.title));
+      const head = el('header', { class: 'kr-post-head' });
+      head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
+      if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
+      if (p.id) head.append(el('span', { class: 'kr-post-id' }, `ID:${p.id}`));
+      head.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
+      art.append(head);
+      if (p.media) art.append(renderMedia(p.media));
+      const text = el('div', { class: 'kr-post-text' });
+      if (p.quote) text.append(...cleanQuote(p.quote).childNodes);
+      for (const a of text.querySelectorAll('a[href]')) {
+        const href = a.getAttribute('href');
+        const local = /^#r(\d+)$/.exec(href);
+        const link = local ? { res, post: Number(local[1]) } : threadLink(href, location.href);
+        if (link && link.res === res && link.post && byNo.has(link.post)) {
+          a.className = 'kr-q';
+          a.dataset.no = String(link.post);
+          a.setAttribute('href', `#kr-p${link.post}`);
+          a.removeAttribute('target');
+          if (!backs.has(link.post)) backs.set(link.post, new Set());
+          backs.get(link.post).add(p.no);
+        } else if (link) {
+          a.className = 'kr-q-thread';
+          a.dataset.res = String(link.res);
+          if (link.post) a.dataset.post = String(link.post);
+          a.removeAttribute('target');
+        } else if (/^https?:/i.test(href)) {
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer nofollow';
+        }
+      }
+      art.append(text);
+      return art;
+    });
+    for (const art of articles) {
+      const from = backs.get(Number(art.dataset.no));
+      if (!from) continue;
+      const foot = el('footer', { class: 'kr-backlinks' }, '↩ ');
+      for (const n of [...from].sort((a, b) => a - b)) foot.append(el('a', { class: 'kr-q', href: `#kr-p${n}`, 'data-no': String(n) }, `>>${n}`));
+      art.append(foot);
+    }
+    pane.body.replaceChildren(...articles, ...(note ? [el('div', { class: 'kr-loading' }, note)] : []));
+  }
+
+  // ---- the detail pane
+  const threadCache = new Map();
+  const CACHE_MS = 60000;
+
+  function loadThread(res, fresh = false) {
+    const hit = threadCache.get(res);
+    if (hit && !fresh && Date.now() - hit.at < CACHE_MS) return hit.promise;
+    const promise = fetch(`pixmicat.php?res=${res}`, { credentials: 'same-origin' })
+      .then((r) => {
+        if (!r.ok) throw new Error(`伺服器回應 HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((html) => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const thread = doc.querySelector(`#threads .thread[data-no="${res}"]`);
+        if (!thread) throw new Error('這一頁裡沒有這串（可能已被刪除或下沉）');
+        return readPosts(thread);
+      });
+    threadCache.set(res, { at: Date.now(), promise });
+    promise.catch(() => threadCache.delete(res));
+    return promise;
+  }
+
+  function setupPane() {
+    const pane = el('aside', { class: 'kr-pane', 'aria-label': '討論串' });
+    const resize = el('div', { class: 'kr-pane-resize', title: '拖曳調整寬度' });
+    const head = el('header', { class: 'kr-pane-head' });
+    const back = el('button', { type: 'button', class: 'kr-btn kr-pane-back' }, '‹ 列表');
+    const titles = el('div', { class: 'kr-pane-titles' });
+    const title = el('div', { class: 'kr-pane-title' }, '討論串');
+    const sub = el('div', { class: 'kr-pane-sub' });
+    titles.append(title, sub);
+    const actions = el('div', { class: 'kr-pane-actions' });
+    const reply = el('button', { type: 'button', class: 'kr-btn kr-primary', title: '回覆這串' }, '✎ 回覆');
+    const newtab = el('a', { class: 'kr-btn', target: '_blank', rel: 'noopener', title: '在新分頁開啟（推噓、檢舉、編輯在那裡）' }, '↗');
+    const reload = el('button', { type: 'button', class: 'kr-btn', title: '重新載入這串' }, '↻');
+    actions.append(reply, newtab, reload);
+    const close = el('button', { type: 'button', class: 'kr-btn kr-pane-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
+    head.append(back, titles, actions, close);
+    const body = el('div', { class: 'kr-pane-body' });
+    const empty = el('div', { class: 'kr-pane-empty' });
+    empty.append(el('span', {}, '點左邊任一串，在這裡閱讀全部回應'), el('small', {}, 'j／k 上下切換 · Enter 開啟 · Esc 關閉 · / 搜尋板塊'));
+    const preview = el('div', { class: 'kr-preview', hidden: '' });
+    pane.append(resize, head, body, empty);
+    document.body.append(pane, preview);
+    const p = (state.pane = { el: pane, body, title, sub, newtab, preview, res: null, full: false });
 
     let width = null;
     try {
@@ -919,8 +1252,9 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       width = null;
     }
     const applyWidth = () => {
-      root.style.setProperty('--kr-drawer-w', `${clampWidth(width, window.innerWidth - state.sideWidth)}px`);
-      root.classList.toggle('kr-docked', window.innerWidth >= 900);
+      const docked = window.innerWidth >= 900;
+      root.classList.toggle('kr-docked', docked);
+      root.style.setProperty('--kr-drawer-w', docked ? `${clampWidth(width, window.innerWidth - state.sideWidth)}px` : '0px');
     };
     applyWidth();
     window.addEventListener('resize', applyWidth);
@@ -949,116 +1283,214 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       resize.addEventListener('lostpointercapture', up, { once: true });
     });
 
-    close.addEventListener('click', closeDrawer);
-    back.addEventListener('click', closeDrawer);
-    reload.addEventListener('click', () => {
-      d.ready = false;
-      try {
-        frame.contentWindow.location.reload();
-      } catch {
-        frame.src = frame.src;
-      }
+    close.addEventListener('click', closePane);
+    back.addEventListener('click', closePane);
+    reload.addEventListener('click', () => p.res && openThread(p.res, { fresh: true }));
+    reply.addEventListener('click', () => {
+      if (!p.res) return;
+      composerReply(p.res);
+      expand(true);
     });
 
-    const markReady = () => {
-      d.loading = null;
-      d.ready = true;
-      for (const msg of d.pending.splice(0)) frame.contentWindow.postMessage(msg, location.origin);
-    };
-
-    window.addEventListener('message', (e) => {
-      if (e.origin !== location.origin || e.source !== frame.contentWindow || !e.data || typeof e.data.kr !== 'string') return;
-      if (e.data.kr === 'ready') {
-        const res = /^\d+$/.test(String(e.data.res || '')) ? Number(e.data.res) : null;
-        if (!readyAccepted(d.loading, res)) return;
-        if (res) setThread(res, e.data.title);
-        else leaveThread(e.data.title, e.data.href);
-        markReady();
-      } else if (e.data.kr === 'close') {
-        closeDrawer();
-      }
-    });
-
-    // the requested page loaded but never said ready (an error page, say): stop waiting for it
-    frame.addEventListener('load', () => {
-      if (d.loading === null) return;
-      let href = '';
-      try {
-        href = frame.contentWindow.location.href;
-      } catch {
+    body.addEventListener('click', (e) => {
+      const q = e.target.closest('.kr-q[data-no]');
+      if (q) {
+        e.preventDefault();
+        flashPost(Number(q.dataset.no));
         return;
       }
-      if (threadLink(href, location.href)?.res === d.loading) markReady();
+      const other = e.target.closest('.kr-q-thread[data-res]');
+      if (other && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        openThread(Number(other.dataset.res), { post: Number(other.dataset.post) || null });
+        return;
+      }
+      const no = e.target.closest('.kr-post-no');
+      if (no) {
+        composerReply(p.res);
+        quoteIntoComposer(Number(no.dataset.no));
+        return;
+      }
+      const spoiler = e.target.closest('.kr-spoiler-btn');
+      if (spoiler) {
+        spoiler.parentElement.classList.remove('kr-spoiler');
+        return;
+      }
+      const img = e.target.closest('.kr-post-media img');
+      if (img) openLightbox(img.dataset.full || img.src);
     });
+
+    // hovering a >>No. shows that post, as the site's popups do
+    body.addEventListener('mouseover', (e) => {
+      const q = e.target.closest('.kr-q[data-no]');
+      if (!q) return;
+      const post = body.querySelector(`#kr-p${q.dataset.no}`);
+      if (!post) return;
+      const copy = post.cloneNode(true);
+      copy.removeAttribute('id');
+      for (const v of copy.querySelectorAll('video')) v.removeAttribute('autoplay');
+      preview.replaceChildren(copy);
+      preview.hidden = false;
+      const r = q.getBoundingClientRect();
+      const w = preview.offsetWidth;
+      const h = preview.offsetHeight;
+      preview.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+      preview.style.top = `${r.top - h - 8 > 8 ? r.top - h - 8 : Math.min(r.bottom + 8, window.innerHeight - h - 8)}px`;
+    });
+    body.addEventListener('mouseout', (e) => {
+      if (e.target.closest('.kr-q[data-no]')) preview.hidden = true;
+    });
+    // only the reader's own scrolling hides it: images loading above shift the scroll position (scroll anchoring)
+    // and fire scroll events that are not the reader's
+    for (const type of ['wheel', 'touchmove']) body.addEventListener(type, () => (preview.hidden = true), { passive: true });
   }
 
-  // the drawer moved off a thread (to the board, a module page): forget the thread so opening it reloads
-  function leaveThread(titleText, href) {
-    const d = state.drawer;
-    d.res = null;
-    d.title.textContent = String(titleText || '').trim() || '討論串以外的頁面';
-    let same = null;
-    try {
-      same = new URL(String(href || ''), location.href);
-    } catch {
-      same = null;
-    }
-    if (same && same.origin === location.origin) d.newtab.href = same.href;
-    else d.newtab.removeAttribute('href');
-    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
+  function openLightbox(src) {
+    const box = el('div', { class: 'kr-lightbox', role: 'dialog', 'aria-label': '原圖' });
+    box.append(el('img', { src, alt: '' }));
+    box.addEventListener('click', () => box.remove());
+    document.body.append(box);
   }
 
-  function setThread(res, titleText) {
-    const d = state.drawer;
-    d.res = res;
-    const listTitle = document.querySelector(`#threads .thread[data-no="${res}"] .threadpost .title`)?.textContent?.trim();
-    const t = (titleText || listTitle || '').trim();
-    d.title.textContent = t && t !== '無題' ? `${t}　No.${res}` : `No.${res}`;
-    d.newtab.href = `pixmicat.php?res=${res}`;
+  function selectCard(res) {
     for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
     document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-selected');
   }
 
-  function sendToFrame(msg) {
-    const d = state.drawer;
-    if (d.ready) d.frame.contentWindow.postMessage(msg, location.origin);
-    else d.pending.push(msg);
+  function setPaneTitle(res, posts) {
+    const p = state.pane;
+    const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
+    const op = posts?.find((x) => x.op);
+    const t = (op?.title || card?.querySelector('.threadpost .title')?.textContent || '').trim();
+    // an untitled thread is named by its first line, as a mail without subject would be
+    const quote = op?.quote || card?.querySelector('.threadpost .quote');
+    const first = (quote?.innerText || quote?.textContent || '').split('\n').map((l) => l.trim()).find((l) => l && !/^>>\d+$/.test(l)) || '';
+    p.title.textContent = t && t !== '無題' ? t : first.slice(0, 60) || `No.${res}`;
+    const count = posts ? `${posts.length - 1} 則回應` : card?.querySelector('.kr-meta-count')?.textContent.replace(/^💬\s*/, '') || '';
+    p.sub.textContent = [`No.${res}`, count].filter(Boolean).join(' · ');
+    p.newtab.href = `pixmicat.php?res=${res}`;
   }
 
-  function openDrawer(res, { post = null, quote = null } = {}) {
-    const d = state.drawer;
-    if (!d) return;
-    clearTimeout(openTimer);
-    if (d.res !== res) {
-      d.loading = res;
-      d.ready = false;
-      d.pending = [];
-      d.frame.src = `pixmicat.php?res=${res}`;
-    }
-    setThread(res);
-    root.classList.add('kr-drawer-open');
-    if (post && post !== res) sendToFrame({ kr: 'scroll', post });
-    if (quote) sendToFrame({ kr: 'quote', no: quote });
-  }
-
-  function closeDrawer() {
-    const d = state.drawer;
-    if (!d) return;
-    clearTimeout(openTimer);
-    root.classList.remove('kr-drawer-open');
-    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
-    // blank the frame so a playing video in it stops
-    d.frame.src = 'about:blank';
-    d.res = null;
-    d.loading = null;
-    d.ready = false;
-    d.pending = [];
+  function flashPost(no) {
+    const post = state.pane?.body.querySelector(`#kr-p${no}`);
+    if (!post) return false;
+    post.scrollIntoView({ block: 'center' });
+    post.classList.remove('kr-flash');
+    void post.offsetWidth;
+    post.classList.add('kr-flash');
+    return true;
   }
 
   let openTimer = null;
 
-  function decorateThreads(scope) {
-    for (const card of scope.querySelectorAll('#threads .thread')) {
+  async function openThread(res, { post = null, quote = null, fresh = false } = {}) {
+    const p = state.pane;
+    if (!p || !res) return;
+    clearTimeout(openTimer);
+    const switching = p.res !== res;
+    p.res = res;
+    root.classList.add('kr-pane-open');
+    selectCard(res);
+    setPaneTitle(res);
+    composerReply(res);
+    if (quote) quoteIntoComposer(quote);
+    if (switching) {
+      p.full = false;
+      p.body.scrollTop = 0;
+      // what the board already shows (the OP and its latest replies) goes up at once; the rest follows the fetch
+      const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
+      if (card) renderPosts(res, readPosts(card), '正在載入其餘回應⋯');
+      else p.body.replaceChildren(el('div', { class: 'kr-loading' }, '載入中⋯'));
+    }
+    if (p.full && !fresh) {
+      if (post) flashPost(post);
+      return;
+    }
+    let posts;
+    try {
+      posts = await loadThread(res, fresh);
+    } catch (err) {
+      if (p.res !== res) return;
+      const box = el('div', { class: 'kr-pane-error' }, `沒能載入這串：${err.message}`);
+      const retry = el('button', { type: 'button', class: 'kr-btn' }, '再試一次');
+      retry.addEventListener('click', () => openThread(res, { fresh: true }));
+      const tab = el('a', { class: 'kr-btn', href: `pixmicat.php?res=${res}`, target: '_blank', rel: 'noopener' }, '在新分頁開啟');
+      box.append(el('br'), retry, tab);
+      p.body.querySelector('.kr-loading')?.remove();
+      p.body.append(box);
+      return;
+    }
+    if (p.res !== res) return;
+    const top = p.body.scrollTop;
+    renderPosts(res, posts);
+    p.body.scrollTop = top;
+    p.full = true;
+    setPaneTitle(res, posts);
+    if (post) flashPost(post);
+    // the next row is the likeliest next read (j): fetch it while this one is being read
+    const next = document.querySelector(`#threads .thread[data-no="${res}"]`)?.nextElementSibling;
+    const nextNo = Number(next?.closest('.thread')?.dataset.no || next?.dataset?.no);
+    if (nextNo) loadThread(nextNo).catch(() => {});
+  }
+
+  function closePane() {
+    const p = state.pane;
+    if (!p) return;
+    clearTimeout(openTimer);
+    root.classList.remove('kr-pane-open');
+    selectCard(null);
+    p.res = null;
+    p.full = false;
+    p.body.replaceChildren();
+    p.preview.hidden = true;
+    composerNew();
+  }
+
+  // ---- the board page's own header, folded into a toolbar
+  function setupToolbar() {
+    const header = document.getElementById('header');
+    const bar = el('div', { class: 'kr-toolbar' });
+    const titles = el('div', { class: 'kr-toolbar-titles' });
+    const boardName = header?.querySelector('h1')?.textContent.trim() || document.title;
+    const view = new URL(location.href).searchParams.get('c');
+    titles.append(el('span', { class: 'kr-toolbar-title' }, view || boardName));
+    if (view) titles.append(el('span', { class: 'kr-toolbar-sub' }, boardName));
+    const online = document.getElementById('online-counter');
+    if (online) titles.append(online);
+    const write = el('button', { type: 'button', class: 'kr-btn kr-primary' }, '✎ 發新串');
+    write.addEventListener('click', () => {
+      composerNew();
+      expand(true);
+    });
+    const refresh = el('a', { class: 'kr-btn', href: location.href.split('#')[0], title: '重新整理' }, '↻');
+    const more = el('button', { type: 'button', class: 'kr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: '更多' }, '⋯');
+    const menu = el('div', { class: 'kr-menu', role: 'menu', hidden: '' });
+    for (const a of header?.querySelectorAll('#toplink a[href]') || []) {
+      const item = el('a', { href: a.getAttribute('href'), role: 'menuitem' }, a.textContent.trim());
+      if (a.target) item.target = a.target;
+      menu.append(item);
+    }
+    const theme = document.getElementById('theme-selector');
+    if (theme) {
+      const row = el('label', { class: 'kr-menu-row' }, '主題');
+      row.append(theme);
+      menu.append(el('div', { class: 'kr-menu-sep' }), row);
+    }
+    const toggleMenu = (open) => {
+      menu.hidden = !open;
+      more.setAttribute('aria-expanded', String(open));
+    };
+    more.addEventListener('click', () => toggleMenu(menu.hidden));
+    document.addEventListener('click', (e) => {
+      if (!menu.hidden && !menu.contains(e.target) && !more.contains(e.target)) toggleMenu(false);
+    });
+    bar.append(titles, write, refresh, more, menu);
+    document.body.prepend(bar);
+  }
+
+  // ---- the board page's list rows
+  function decorateThreads() {
+    for (const card of document.querySelectorAll('#threads .thread')) {
       const replies = card.querySelectorAll('.post.reply');
       const total = replies.length + omittedCount(card.querySelector('.warn_txt2')?.textContent || '');
       const time = replies.length ? shortTime(replies[replies.length - 1].querySelector('.now')?.textContent || '', new Date()) : null;
@@ -1066,8 +1498,13 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       let meta = card.querySelector('.kr-meta');
       if (!meta) {
         meta = el('div', { class: 'kr-meta' });
-        meta.append(el('span'));
+        meta.append(el('span', { class: 'kr-meta-count' }));
         card.append(meta);
+        // the row keeps only its title and text; when it was posted goes to the corner, as in a mail list
+        const opTitle = card.querySelector('.threadpost .title');
+        if (opTitle?.textContent.trim() === '無題') opTitle.classList.add('kr-untitled');
+        const when = shortTime(card.querySelector('.threadpost .now')?.textContent || '', new Date());
+        if (when) card.append(el('span', { class: 'kr-when' }, when));
       }
       if (meta.firstChild.textContent !== label) meta.firstChild.textContent = label;
       let peek = meta.querySelector('button');
@@ -1084,29 +1521,61 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     }
   }
 
-  function initTop() {
+  function initBoard() {
     root.classList.add('kr-md');
     if (window.name !== 'cont' || window.top === window) setupSidebar(BOARDS);
-    setupDrawer();
-    decorateThreads(document);
+    setupToolbar();
+    setupPane();
+    composerNew();
+    decorateThreads();
     const threads = document.getElementById('threads');
-    if (threads) new MutationObserver(() => decorateThreads(document)).observe(threads, { childList: true, subtree: true });
+    // one pass per frame at most, and none for our own footers
+    let queued = false;
+    if (threads) {
+      new MutationObserver((records) => {
+        if (queued || records.every((r) => r.target.closest?.('.kr-meta'))) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          decorateThreads();
+        });
+      }).observe(threads, { childList: true, subtree: true });
+    }
+
+    // the site's ▲▼ scroll buttons are a bare fixed div (inside a <center>) at the window's right edge, now under the pane:
+    // give them the list's edge
+    const tagScroll = () => {
+      for (const n of document.querySelectorAll('div[style*="position: fixed"]:not([class])')) {
+        if (/^▲\s*▼$/.test(n.textContent.trim())) n.classList.add('kr-site-scroll');
+      }
+    };
+    window.addEventListener('load', () => {
+      tagScroll();
+      setTimeout(tagScroll, 1500);
+    }, { once: true });
+
+    // a row the pointer rests on is probably next: start its fetch
+    let hoverTimer = null;
+    threads?.addEventListener('mouseover', (e) => {
+      const card = e.target.closest('.thread[data-no]');
+      if (!card || card.contains(e.relatedTarget)) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => loadThread(Number(card.dataset.no)).catch(() => {}), 180);
+    });
 
     window.addEventListener(
       'click',
       (e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         if (!e.target.closest?.('#threads')) return;
-        // on a thread page the No. quotes into this page's own form (see init)
-        if (!composer.resto) onHeadNumber(e, (no, op) => openDrawer(op, { quote: no }));
+        onHeadNumber(e, (no, op) => openThread(op, { quote: no }));
         if (e.defaultPrevented) return;
-        // an OP thumbnail in the list opens the thread (the pane shows the full image); the site would expand it in the row
-        const thumb = e.target.closest('.threadpost .file-thumb');
-        const thumbRes = Number(thumb?.closest('.thread[data-no]')?.dataset.no);
+        // an OP thumbnail opens the thread (the pane shows the full image); the site would expand it in the row
+        const thumbRes = Number(e.target.closest('.threadpost .file-thumb')?.closest('.thread[data-no]')?.dataset.no);
         if (thumbRes) {
           e.preventDefault();
           e.stopPropagation();
-          openDrawer(thumbRes);
+          openThread(thumbRes);
           return;
         }
         const a = e.target.closest('a[href]');
@@ -1115,44 +1584,26 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
           if (link) {
             e.preventDefault();
             e.stopPropagation();
-            openDrawer(link.res, { post: link.post });
+            openThread(link.res, { post: link.post });
             return;
           }
         }
         if (e.target.closest('a, button, input, label, textarea, select, summary, video, .file-thumb, .postvote-slot, .post-menu-toggle, .qlink')) return;
         const card = e.target.closest('#threads .thread[data-no]');
-        if (card) openDrawer(Number(card.dataset.no));
+        if (card) openThread(Number(card.dataset.no));
       },
       true,
     );
   }
 
-  function initEmbed() {
-    // a board or module page opened inside the drawer has no resto
-    const res = composer.resto;
-    const title = res ? document.querySelector('#threads .threadpost .title')?.textContent || '' : document.title;
-    window.addEventListener('message', (e) => {
-      if (e.origin !== location.origin || e.source !== window.parent || !e.data) return;
-      if (e.data.kr === 'quote' && /^\d+$/.test(String(e.data.no))) {
-        flashPost(Number(e.data.no));
-        quoteIntoComposer(Number(e.data.no));
-      } else if (e.data.kr === 'scroll' && /^\d+$/.test(String(e.data.post))) {
-        flashPost(Number(e.data.post));
-      }
-    });
-    window.parent.postMessage({ kr: 'ready', res, title, href: location.href }, location.origin);
-  }
-
   function onKey(e) {
     if (e.isComposing || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const { form } = composer;
-    if (e.key === 'Escape' && form && form.dataset.krState === 'expanded') {
-      collapse();
-      return;
-    }
     if (e.key === 'Escape') {
-      if (embedded) window.parent.postMessage({ kr: 'close' }, location.origin);
-      else closeDrawer();
+      const box = document.querySelector('.kr-lightbox');
+      if (box) box.remove();
+      else if (form && form.dataset.krState === 'expanded') collapse();
+      else closePane();
       return;
     }
     if (!root.classList.contains('kr-md') || e.target.closest?.('input, textarea, select, [contenteditable]') || e.target.isContentEditable) return;
@@ -1162,36 +1613,41 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       const next = stepIndex(current, e.key === 'j' ? 1 : -1, cards.length);
       if (next < 0) return;
       e.preventDefault();
-      for (const card of cards) card.classList.remove('kr-selected');
-      cards[next].classList.add('kr-selected');
+      selectCard(Number(cards[next].dataset.no));
       cards[next].scrollIntoView({ block: 'nearest' });
       clearTimeout(openTimer);
-      openTimer = setTimeout(() => openDrawer(Number(cards[next].dataset.no)), 250);
+      openTimer = setTimeout(() => openThread(Number(cards[next].dataset.no)), 200);
     } else if (e.key === 'Enter' || e.key === 'o') {
       const card = document.querySelector('#threads .thread.kr-selected');
       if (card) {
         e.preventDefault();
-        openDrawer(Number(card.dataset.no));
+        openThread(Number(card.dataset.no));
       }
     }
   }
 
   function init() {
     if (root.classList.contains('kr-portal')) {
+      root.toggleAttribute('data-kr-dark', window.matchMedia('(prefers-color-scheme: dark)').matches);
       setupSidebar(portalBoards(), true);
       return;
     }
     watchTheme();
     setupComposer();
-    if (composer.resto) window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
     document.addEventListener('keydown', onKey);
-    if (embedded) initEmbed();
-    else if (document.getElementById('threads') && !document.querySelector('#postform_main input[name="resto"]')) initTop();
+    if (composer.resto) {
+      root.classList.add('kr-thread');
+      window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
+    } else if (document.getElementById('threads')) {
+      initBoard();
+    }
   }
 
   function start() {
+    // the hidden frame that receives posts loads the board too; it needs none of this
+    if (window.name === 'kr-sink') return;
     root = document.documentElement;
-    root.classList.add('kr', location.hostname === 'komica1.org' ? 'kr-portal' : embedded ? 'kr-embed' : 'kr-top');
+    root.classList.add('kr', location.hostname === 'komica1.org' ? 'kr-portal' : 'kr-top');
     const style = document.createElement('style');
     style.id = 'kr-style';
     style.textContent = CSS;

@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -103,22 +103,8 @@ test('a narrow window never gets a drawer below its minimum', () => {
   assert.equal(clampWidth(600, 500), MIN_W);
 });
 
-test('while a thread is loading, a late ready from the previous page is ignored', () => {
-  assert.equal(readyAccepted(200, 100), false); // opened A, then B quickly: A answers late
-  assert.equal(readyAccepted(200, null), false); // a board page answering while B loads
-  assert.equal(readyAccepted(200, 200), true);
-});
 
-test('with nothing loading, wherever the reader went inside the drawer is accepted', () => {
-  assert.equal(readyAccepted(null, 300), true); // followed a link to another thread
-  assert.equal(readyAccepted(null, null), true); // went to the board inside the drawer
-});
 
-test('the drawer takes the first solid background, skipping transparent ones', () => {
-  assert.equal(opaqueColor(['rgba(0, 0, 0, 0)', 'rgb(255, 255, 238)'], '#fff'), 'rgb(255, 255, 238)');
-  assert.equal(opaqueColor(['rgb(34 34 34 / 100%)'], '#fff'), 'rgb(34, 34, 34)');
-  assert.equal(opaqueColor(['transparent', 'rgba(10, 10, 10, 0.2)'], '#fff'), '#fff');
-});
 
 test('omitted reply count survives the site replacing its tail', () => {
   assert.equal(omittedCount('有回應 25 篇被省略。要閱讀所有回應請按下回應連結。'), 25);
@@ -149,4 +135,35 @@ test('the 18禁 gate follows the portal: a four-digit year from 1900, at least 1
   assert.equal(ageVerdict('2027', 2026), 'invalid'); // the future
   assert.equal(ageVerdict('1899', 2026), 'invalid');
   for (const bad of ['', '94', '19944', 'abcd', '1994.5', null]) assert.equal(ageVerdict(bad, 2026), 'invalid', String(bad));
+});
+
+test('a file name tells a video from an image', () => {
+  assert.equal(mediaKind('https://gita-pix.komica1.org/src/1793056027936.mp4'), 'video');
+  assert.equal(mediaKind('https://x/src/a.WEBM?x=1'), 'video');
+  assert.equal(mediaKind('https://gita-pix.komica1.org/src/1793026143967.png'), 'image');
+  assert.equal(mediaKind('https://x/src/mp4.jpg'), 'image');
+});
+
+test('image size comes from the file line, so the pane reserves its box before the image loads', () => {
+  assert.deepEqual(plain(fileDims('1792991788404.png-(1879 KB, 1054x1536)')), { w: 1054, h: 1536 });
+  assert.deepEqual(plain(fileDims('a.mp4-(5998 KB, 632x358) ▾')), { w: 632, h: 358 });
+  assert.equal(fileDims('a.png-(12 KB)'), null);
+  assert.equal(fileDims(''), null);
+});
+
+test('only the board itself confirms a post; a redirect is waited out; anything else is not a verdict', () => {
+  assert.equal(postOutcome({ readable: true, threads: true, redirect: false, text: '' }).kind, 'ok');
+  assert.equal(postOutcome({ readable: true, threads: false, redirect: true, text: '' }).kind, 'wait');
+  const err = postOutcome({ readable: true, threads: false, redirect: false, text: '  在沒有附加圖檔的情況下，\n 請寫入內文 ' });
+  assert.equal(err.kind, 'unknown');
+  assert.ok(err.message.includes('在沒有附加圖檔的情況下， 請寫入內文'), err.message);
+  assert.equal(postOutcome({ readable: false, threads: false, redirect: false, text: '' }).kind, 'unknown');
+  assert.equal(postOutcome({ readable: true, threads: false, redirect: false, text: '   ' }).message, '回應頁是空的');
+});
+
+test('the reply is found again by its first line that is not a quote', () => {
+  assert.equal(postedProbe('>>30978579\n幹得下去嗎？？？'), '幹得下去嗎？？？');
+  assert.equal(postedProbe('>>1\n>>2\n\n  第二段  \n第三段'), '第二段');
+  assert.equal(postedProbe('>>1\n>>2\n'), '');
+  assert.equal(postedProbe('x'.repeat(50)).length, 30);
 });
