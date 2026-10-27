@@ -11,6 +11,7 @@ Userscript managers update a script only when `@version` goes up, so every versi
 - Hover `>>No.` in a thread to preview the post; each post lists who replied to it.
 - Replies are written in the board's own form, which now floats over the open thread. It posts into a hidden frame, so the list stays put, and keeps your text unless the post is confirmed.
 - The thread pane no longer has the site's votes, report or edit buttons; **↗** opens the thread in a new tab for those.
+- The pane is there only while a thread is open: × or Esc closes it and the list takes the whole width.
 
 ## 0.3.0 — 2026-10-27
 

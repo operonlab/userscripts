@@ -442,7 +442,10 @@ html.kr-md #threads a, html.kr-thread #threads a { color: var(--kr-accent); }
 .kr-btn.kr-primary:hover { background: color-mix(in srgb, var(--kr-accent) 88%, #000); }
 
 /* board page: a toolbar on top of the list column, the site's header folded into its ⋯ menu */
-html.kr-md body { margin: 0 var(--kr-drawer-w) 0 var(--kr-side) !important; padding: 0 18px 28px !important; }
+html.kr-md body { margin: 0 0 0 var(--kr-side) !important; padding: 0 18px 28px !important; }
+/* the pane exists only while a thread is open; closed, the list has the whole width */
+html.kr-md.kr-pane-open body { margin-right: var(--kr-drawer-w) !important; }
+html.kr-docked:not(.kr-pane-open) .kr-pane { display: none; }
 html.kr-md #header, html.kr-md #board-post-transition, html.kr-md #board-post-divider-start, html.kr-md #board-post-divider-end,
 html.kr-md #del, html.kr-md #threads .thread > hr { display: none !important; }
 html.kr .kr-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; margin: 0 -18px 12px; padding: 10px 18px;
@@ -488,7 +491,7 @@ html.kr-md #threads .post-head .qlink { color: var(--kr-text3) !important; }
 html.kr-md #threads .threadpost .quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
   margin: 0 56px 0 0; font-size: 14px; line-height: 1.55; color: var(--kr-text) !important; }
 html.kr-md #threads .threadpost .post-head .kr-untitled + * { margin-top: 0; }
-html.kr-md .kr-site-scroll { right: calc(var(--kr-drawer-w) + 10px) !important; }
+html.kr-md.kr-pane-open .kr-site-scroll { right: calc(var(--kr-drawer-w) + 10px) !important; }
 html.kr-md #threads .thread.kr-peek .post.reply { display: block; margin: 8px 0 0 84px; padding: 8px 10px; border-radius: 10px; background: var(--kr-fill) !important; font-size: 13px; }
 html.kr-md .kr-meta { clear: both; display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--kr-text2); }
 html.kr-md .kr-meta button { border: 0; padding: 0; background: none; color: var(--kr-accent); font: inherit; cursor: pointer; }
@@ -522,7 +525,7 @@ html.kr .kr-composer[data-kr-state="expanded"] .kr-composer-close { display: blo
 html.kr .kr-composer-status { padding: 0 14px 10px; font-size: 12px; color: var(--kr-text2); white-space: pre-wrap; }
 html.kr .kr-composer-status:empty { display: none; }
 html.kr .kr-composer-status.kr-error { color: #ff453a; }
-html.kr-md .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
+html.kr-md.kr-pane-open .kr-composer.kr-new { right: calc(var(--kr-drawer-w) + 16px); }
 html.kr-md .kr-composer.kr-new[data-kr-state="collapsed"] { width: auto; border-radius: 999px; }
 html.kr-md .kr-composer.kr-reply-pane { right: 12px; bottom: 12px; width: calc(var(--kr-drawer-w) - 24px); }
 html.kr-md .kr-composer.kr-reply-pane[data-kr-state="expanded"] { max-height: 70vh; }
@@ -540,9 +543,6 @@ html.kr .kr-pane-titles { flex: 1; min-width: 0; }
 html.kr .kr-pane-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/1.3 var(--kr-font); }
 html.kr .kr-pane-sub { font-size: 12px; color: var(--kr-text2); }
 html.kr .kr-pane-body { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 8px 20px 120px; }
-html.kr .kr-pane-empty { flex: 1; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--kr-text2); font-size: 14px; }
-html.kr .kr-pane-empty small { color: var(--kr-text3); font-size: 12px; }
-html.kr.kr-pane-open .kr-pane-empty, html.kr:not(.kr-pane-open) .kr-pane-body, html.kr:not(.kr-pane-open) .kr-pane-actions { display: none; }
 html.kr .kr-pane-actions { display: flex; gap: 6px; }
 html.kr .kr-pane-back { display: none; }
 html.kr .kr-pane-resize { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; }
@@ -1138,7 +1138,8 @@ html.kr-portal .kr-side { border-right: 0; }
       // the board syncs uploads to its image host in the background: until then only the thumbnail exists
       if (m.thumb) node.addEventListener('error', () => node.getAttribute('src') !== m.thumb && node.setAttribute('src', m.thumb), { once: true });
     }
-    if (m.dims) {
+    // images reserve their box from the file line; videos take their own size (the line can be off for them)
+    if (m.dims && m.kind !== 'video') {
       node.setAttribute('width', String(m.dims.w));
       node.setAttribute('height', String(m.dims.h));
     }
@@ -1238,10 +1239,8 @@ html.kr-portal .kr-side { border-right: 0; }
     const close = el('button', { type: 'button', class: 'kr-btn kr-pane-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
     head.append(back, titles, actions, close);
     const body = el('div', { class: 'kr-pane-body' });
-    const empty = el('div', { class: 'kr-pane-empty' });
-    empty.append(el('span', {}, '點左邊任一串，在這裡閱讀全部回應'), el('small', {}, 'j／k 上下切換 · Enter 開啟 · Esc 關閉 · / 搜尋板塊'));
     const preview = el('div', { class: 'kr-preview', hidden: '' });
-    pane.append(resize, head, body, empty);
+    pane.append(resize, head, body);
     document.body.append(pane, preview);
     const p = (state.pane = { el: pane, body, title, sub, newtab, preview, res: null, full: false });
 
@@ -1389,8 +1388,11 @@ html.kr-portal .kr-side { border-right: 0; }
     clearTimeout(openTimer);
     const switching = p.res !== res;
     p.res = res;
+    const wasOpen = root.classList.contains('kr-pane-open');
     root.classList.add('kr-pane-open');
     selectCard(res);
+    // opening the pane narrows the list and rewraps every row: keep the chosen row in sight
+    if (!wasOpen) document.querySelector(`#threads .thread[data-no="${res}"]`)?.scrollIntoView({ block: 'nearest' });
     setPaneTitle(res);
     composerReply(res);
     if (quote) quoteIntoComposer(quote);

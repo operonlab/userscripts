@@ -130,19 +130,13 @@ try {
   check('list: 無題 is not shown as a title; each row has its time in the corner', list.every((c) => !c.untitledShown && c.when));
   await shot(page, '1-board.png');
 
-  const empty = await page.evaluate(() => ({
-    docked: document.documentElement.classList.contains('kr-docked'),
-    pane: getComputedStyle(document.querySelector('.kr-pane')).visibility,
-    empty: getComputedStyle(document.querySelector('.kr-pane-empty')).display !== 'none',
+  const layout = () => page.evaluate(() => ({
+    pane: getComputedStyle(document.querySelector('.kr-pane')).display,
     bodyRight: getComputedStyle(document.body).marginRight,
     paneWidth: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().width),
   }));
-  check('pane: docked on the right and empty before a row is chosen', empty.docked && empty.pane === 'visible' && empty.empty && empty.bodyRight === `${empty.paneWidth}px`, JSON.stringify(empty));
-  const arrows = await page.evaluate(() => {
-    const n = document.querySelector('.kr-site-scroll');
-    return n ? { right: Math.round(n.getBoundingClientRect().right), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) } : null;
-  });
-  check("list: the site's ▲▼ buttons sit at the list's edge, not under the pane", !!arrows && arrows.right <= arrows.paneLeft, JSON.stringify(arrows));
+  const before = await layout();
+  check('pane: no thread open, no pane — the list has the whole width', before.pane === 'none' && before.bodyRight === '0px', JSON.stringify(before));
 
   // a thread with replies, an OP image and, if any, in-thread quotes
   const target = (list.find((c) => c.replies && c.image && c.quotes) || list.find((c) => c.replies && c.image) || list.find((c) => c.replies))?.res;
@@ -176,12 +170,25 @@ try {
   check('pane: what the board already shows appears at once, before the fetch', instantMs < 500, `${instantMs} ms to first post, ${fullMs} ms to the whole thread`);
   check('pane: the whole thread is drawn — every post the thread page has', shown.posts === truth.posts && shown.sub.includes(`No.${target}`) && shown.sub.includes(`${truth.posts - 1} 則回應`), JSON.stringify({ shown: shown.posts, truth: truth.posts, sub: shown.sub }));
   check('pane: the row is marked and the board did not navigate', shown.selected === String(target) && page.url() === urlBefore);
+  const during = await layout();
+  check('pane: an open thread docks the pane on the right and the list makes room', during.pane === 'flex' && during.bodyRight === `${during.paneWidth}px` && during.paneWidth >= 380, JSON.stringify(during));
+  const arrows = await page.evaluate(() => {
+    const n = document.querySelector('.kr-site-scroll');
+    return n ? { right: Math.round(n.getBoundingClientRect().right), paneLeft: Math.round(document.querySelector('.kr-pane').getBoundingClientRect().left) } : null;
+  });
+  check("list: the site's ▲▼ buttons sit at the list's edge, not under the pane", !!arrows && arrows.right <= arrows.paneLeft, JSON.stringify(arrows));
   await page.waitForTimeout(1500);
   const firstImg = await page.evaluate((src) => {
     const m = [...document.querySelectorAll('.kr-pane .kr-post-media img, .kr-pane .kr-post-media video')].find((n) => n.getAttribute('src') === src);
-    return m ? { tag: m.tagName, w: Math.round(m.getBoundingClientRect().width), natural: m.naturalWidth || m.videoWidth || 0 } : null;
+    if (!m) return null;
+    const nw = m.naturalWidth || m.videoWidth || 0;
+    const nh = m.naturalHeight || m.videoHeight || 0;
+    // its own size, scaled down only to fit the post's width and 70% of the window height
+    const room = m.closest('.kr-post').clientWidth;
+    const scale = nw && nh ? Math.min(1, room / nw, (innerHeight * 0.7) / nh) : 0;
+    return { tag: m.tagName, w: Math.round(m.getBoundingClientRect().width), natural: nw, expected: Math.round(nw * scale) };
   }, truth.firstMedia);
-  check('pane: images are the originals, shown large without a click', !!truth.firstMedia && !!firstImg && firstImg.w > 250, JSON.stringify({ firstImg, src: truth.firstMedia?.slice(-40) }));
+  check('pane: media are the originals, at their own size (fitted to the pane) without a click', !!truth.firstMedia && !!firstImg && firstImg.natural > 0 && Math.abs(firstImg.w - firstImg.expected) <= 3, JSON.stringify({ firstImg, src: truth.firstMedia?.slice(-40) }));
   const reply = await page.evaluate((res) => {
     const f = document.getElementById('postform_main');
     const resto = f.querySelector('input[name="resto"]');
@@ -232,11 +239,12 @@ try {
   await page.keyboard.press('Escape');
   const closed = await page.evaluate(() => ({
     open: document.documentElement.classList.contains('kr-pane-open'),
-    empty: getComputedStyle(document.querySelector('.kr-pane-empty')).display !== 'none',
+    pane: getComputedStyle(document.querySelector('.kr-pane')).display,
+    bodyRight: getComputedStyle(document.body).marginRight,
     restoDisabled: document.querySelector('#postform_main input[name="resto"]').disabled,
     selected: !!document.querySelector('#threads .thread.kr-selected'),
   }));
-  check('pane: Esc again closes the thread; the form is back to 發新串', !closed.open && closed.empty && closed.restoDisabled && !closed.selected, JSON.stringify(closed));
+  check('pane: Esc again closes the thread and the pane; the list takes the width back; the form is 發新串 again', !closed.open && closed.pane === 'none' && closed.bodyRight === '0px' && closed.restoDisabled && !closed.selected, JSON.stringify(closed));
 
   // thumbnail, [回應], j
   const thumb = page.locator(`#threads .thread[data-no="${target}"] .threadpost .file-thumb img`);
