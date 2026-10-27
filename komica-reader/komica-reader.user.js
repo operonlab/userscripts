@@ -292,6 +292,13 @@
     return null;
   }
 
+  // the portal's own rule: a year from 1900 to this year, at least 18 years ago
+  function ageVerdict(value, currentYear) {
+    const year = /^\s*\d{4}\s*$/.test(String(value)) ? Number(value) : NaN;
+    if (!(year >= 1900 && year <= currentYear)) return 'invalid';
+    return currentYear - year >= 18 ? 'adult' : 'minor';
+  }
+
   function filterBoards(boards, query) {
     const needle = String(query).trim().toLocaleLowerCase();
     return needle ? boards.filter((board) => `${board.l} ${board.c}`.toLocaleLowerCase().includes(needle)) : boards;
@@ -366,7 +373,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -506,6 +513,13 @@ html.kr .kr-side-row > a { flex: 1; min-width: 0; padding: 5px 6px 5px 10px; ove
 html.kr .kr-side-star { flex: none; width: 28px; min-height: 28px; border: 0; background: none; }
 html.kr .kr-side-down { opacity: .5; }
 html.kr .kr-side-tag { flex: none; font-size: 10px; padding-right: 3px; }
+html.kr .kr-side-gate { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 8px; }
+html.kr .kr-side-gate[hidden] { display: none; }
+html.kr .kr-side-gate input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--kr-line); border-radius: 6px;
+  background: var(--kr-bg); color: inherit; font: inherit; }
+html.kr .kr-side-gate button { padding: 5px 10px; border: 1px solid var(--kr-line); border-radius: 6px; background: none; }
+html.kr .kr-side-gate-error { flex-basis: 100%; font-size: 12px; color: #c00; }
+html.kr .kr-side-gate-error:empty { display: none; }
 html.kr .kr-side-open { display: none; position: fixed; z-index: 9000; top: 5px; left: 5px; width: 30px; height: 30px;
   border: 1px solid var(--kr-line); background: var(--kr-bg); color: inherit; cursor: pointer; }
 html.kr.kr-side-hidden .kr-side { display: none; }
@@ -548,6 +562,14 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
     let stars = store.get('kr.stars', []);
     let recent = store.get('kr.recent', []);
     let collapsed = store.get('kr.collapsed', {});
+    let adultOk = store.get('kr.k2', false) === true;
+    if (portal && !adultOk) {
+      try {
+        adultOk = localStorage.getItem('k2_verified') === '1';
+      } catch {
+        adultOk = false;
+      }
+    }
     if (!Array.isArray(stars)) stars = [];
     if (!Array.isArray(recent)) recent = [];
     if (!collapsed || typeof collapsed !== 'object' || Array.isArray(collapsed)) collapsed = {};
@@ -640,8 +662,46 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       node.append(link, star);
       return node;
     };
+    // the portal locks its 18禁 section behind a birth-year question; the sidebar asks the same question
+    const isAdult = (board) => /18禁/.test(board.c);
+    const ageGate = (name) => {
+      const section = el('section', { class: 'kr-side-group' });
+      const toggle = el('button', { type: 'button', class: 'kr-side-group-toggle', 'aria-expanded': 'false' }, `🔒 ${name.replace(/^▶\s*/, '').replace(/\s*\[鎖定\]$/, '')}`);
+      const form = el('form', { class: 'kr-side-gate', hidden: '' });
+      const year = el('input', { type: 'number', inputmode: 'numeric', placeholder: '出生年（西元）', 'aria-label': '出生年（西元）' });
+      const error = el('span', { class: 'kr-side-gate-error', role: 'alert' });
+      form.append(year, el('button', { type: 'submit' }, '確認'), error);
+      toggle.addEventListener('click', () => {
+        form.hidden = !form.hidden;
+        if (!form.hidden) year.focus();
+      });
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const verdict = ageVerdict(year.value, new Date().getFullYear());
+        if (verdict !== 'adult') {
+          error.textContent = verdict === 'minor' ? '未滿 18 歲不得瀏覽' : '請輸入有效的出生西元年';
+          return;
+        }
+        adultOk = true;
+        store.set('kr.k2', true);
+        if (portal) {
+          try {
+            localStorage.setItem('k2_verified', '1');
+          } catch {
+            /* the site's own flag is a nicety; the sidebar already remembers */
+          }
+        }
+        render();
+      });
+      section.append(toggle, form);
+      list.append(section);
+    };
     const group = (name, items, isCollapsed = false) => {
       if (!items.length) return;
+      if (!adultOk && items.some(isAdult)) {
+        ageGate(name);
+        return;
+      }
       const section = el('section', { class: 'kr-side-group' });
       const toggle = el('button', { type: 'button', class: 'kr-side-group-toggle', 'aria-expanded': String(!isCollapsed) }, `${isCollapsed ? '▸' : '▾'} ${name.replace(/^▶\s*/, '').replace(/\s*\[鎖定\]$/, '')}`);
       toggle.addEventListener('click', () => {
@@ -658,20 +718,16 @@ html.kr .kr-flash { animation: kr-flash 1.6s ease-out; }
       list.replaceChildren();
       const query = search.value.trim();
       if (query) {
-        for (const board of filterBoards(boards, query)) list.append(row(board));
+        for (const board of filterBoards(boards, query)) if (adultOk || !isAdult(board)) list.append(row(board));
         return;
       }
       group('★ 書籤', stars.map(byUrl).filter(Boolean));
       group('最近', recent.map(byUrl).filter(Boolean));
+      // unreachable boards stay in their category, dimmed: moving them out made categories look short
       const categories = [...new Set(boards.map((board) => board.c))];
       for (const category of categories) {
-        const items = boards.filter((board) => board.c === category && board.s !== 'down');
-        // the site's menu keeps its 18禁 section locked until clicked; here it starts folded
-        group(category, items, (collapsed[category] ?? /18禁/.test(category)) && !(currentExpanded && category === current?.c));
+        group(category, boards.filter((board) => board.c === category), !!collapsed[category] && !(currentExpanded && category === current?.c));
       }
-      const down = boards.filter((board) => board.s === 'down');
-      const downName = `目前連不上（${down.length}）`;
-      group(downName, down, collapsed[downName] !== false);
     };
     search.addEventListener('input', render);
     search.addEventListener('keydown', (e) => {

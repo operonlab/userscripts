@@ -6,9 +6,9 @@ Userscript managers update a script only when `@version` goes up, so every versi
 ## 0.3.0 — 2026-10-27
 
 - Added a searchable board sidebar on the 綜合 page and in the desktop portal's menu frame. Stars, recent boards, folded categories, and sidebar visibility use userscript storage across hosts.
-- Added current-board highlighting, a dated group for boards unreachable in the survey, and a 248px portal menu column. The board sidebar becomes an overlay on narrow screens.
+- Added current-board highlighting, dimmed 連不上 tags (with the survey date) on boards that were unreachable, kept in their own category, and a 248px portal menu column. The board sidebar becomes an overlay on narrow screens.
 - The board list is generated from the survey with `research/build-boards.mjs` and checked with `--check`.
-- The 18禁 section, which the portal keeps locked, starts folded in the sidebar.
+- The 18禁 section asks for a birth year, as the portal does, and remembers the answer across hosts.
 - Board rows are compact (thumbnail, title, three lines); clicking the thumbnail opens the thread instead of expanding the image inside the list.
 
 ## 0.2.0 — 2026-10-27

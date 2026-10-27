@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, opaqueColor, readyAccepted, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -140,4 +140,13 @@ test('thread navigation clamps and handles no selection or no cards', () => {
   assert.equal(stepIndex(2, 1, 3), 2);
   assert.equal(stepIndex(1, -1, 3), 0);
   assert.equal(stepIndex(-1, 1, 0), -1);
+});
+
+test('the 18禁 gate follows the portal: a four-digit year from 1900, at least 18 years back', () => {
+  assert.equal(ageVerdict('1994', 2026), 'adult');
+  assert.equal(ageVerdict(' 2008 ', 2026), 'adult'); // exactly 18
+  assert.equal(ageVerdict('2009', 2026), 'minor');
+  assert.equal(ageVerdict('2027', 2026), 'invalid'); // the future
+  assert.equal(ageVerdict('1899', 2026), 'invalid');
+  for (const bad of ['', '94', '19944', 'abcd', '1994.5', null]) assert.equal(ageVerdict(bad, 2026), 'invalid', String(bad));
 });

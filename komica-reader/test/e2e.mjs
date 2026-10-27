@@ -314,7 +314,22 @@ try {
     const toggle = [...document.querySelectorAll('.kr-side-group-toggle')].find((b) => b.textContent.includes('18禁'));
     return toggle ? { expanded: toggle.getAttribute('aria-expanded'), rows: toggle.parentElement.querySelectorAll('.kr-side-row').length, text: toggle.textContent } : null;
   });
-  check('sidebar: the 18禁 section starts folded, as the site keeps it locked', !!adult && adult.expanded === 'false' && adult.rows === 0 && !adult.text.includes('[鎖定]'), JSON.stringify(adult));
+  check('sidebar: the 18禁 section starts locked behind the birth-year question', !!adult && adult.expanded === 'false' && adult.rows === 0 && adult.text.includes('🔒') && !adult.text.includes('[鎖定]'), JSON.stringify(adult));
+  const gateToggle = page.locator('.kr-side-group-toggle', { hasText: '18禁' });
+  await gateToggle.click();
+  await page.locator('.kr-side-gate input').fill('2015');
+  await page.locator('.kr-side-gate button[type="submit"]').click();
+  const minor = await page.evaluate(() => ({ error: document.querySelector('.kr-side-gate-error')?.textContent, rows: document.querySelectorAll('.kr-side-row a[href="https://2cat.org/touhoux/"]').length }));
+  await page.locator('.kr-side-gate input').fill('1994');
+  await page.locator('.kr-side-gate button[type="submit"]').click();
+  const unlocked = await page.evaluate(() => document.querySelectorAll('.kr-side-row a[href="https://2cat.org/touhoux/"]').length);
+  check('sidebar: 1994 opens the 18禁 boards, an under-18 year does not', minor.rows === 0 && /未滿/.test(minor.error || '') && unlocked === 1, JSON.stringify({ minor, unlocked }));
+  const inPlace = await page.evaluate(() => {
+    const row = document.querySelector('.kr-side-row a[href="https://grea.komica1.org/50/index.htm"]')?.closest('.kr-side-row');
+    const group = row?.closest('.kr-side-group')?.querySelector('.kr-side-group-toggle')?.textContent || '';
+    return { dimmed: !!row?.classList.contains('kr-side-down'), group, separate: [...document.querySelectorAll('.kr-side-group-toggle')].some((b) => b.textContent.includes('目前連不上')) };
+  });
+  check('sidebar: an unreachable board stays in its own category, dimmed', inPlace.dimmed && inPlace.group.includes('連線板') && !inPlace.separate, JSON.stringify(inPlace));
 
   await page.locator('.kr-side-search').fill('動畫');
   const searchResult = await page.evaluate(() => {
@@ -326,6 +341,7 @@ try {
   await page.locator('.kr-side-row:has(a[href="https://gaia.komica1.org/00b/index.htm"]) .kr-side-star').first().click();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.kr-side');
+  check('sidebar: the 18禁 unlock survives reload', await page.evaluate(() => document.querySelectorAll('.kr-side-row a[href="https://2cat.org/touhoux/"]').length === 1));
   check('sidebar: starred board survives reload under ★ 書籤', await page.evaluate(() => {
     const first = document.querySelector('.kr-side-group');
     return first?.textContent.includes('★ 書籤') && !!first.querySelector('a[href="https://gaia.komica1.org/00b/index.htm"]');
