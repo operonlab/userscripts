@@ -3,6 +3,16 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.6.0 — 2026-10-27
+
+What users of the board asked for, and the site features they like, carried into the reader.
+
+- **ID tools in the pane.** Once the thread is whole, each ID shows how many posts it has in it (×N, or 單發) and is coloured by that, as the site used to. Clicking an ID marks its posts and dims the rest. The site's ID menu (搜尋此 ID、隱藏此 ID) opens from the ⋯ beside it.
+- **The site's ▾ post menu** on list rows and on every post in the pane: 檢舉, 隱藏此留言／此討論串, 加入圖書館／映畫館／備忘錄, 複製. Hiding from it applies in the pane at once.
+- **類別** show on list rows and under posts in the pane, as links to the site's category pages.
+- **The form keeps the site's own lines**: 回應模式 with the view count, the site's notices (folded behind one line, 站方公告 · N 則) and its 發文說明與注意事項.
+- An untitled thread's title no longer picks up the ▲▼ counts (0.5.2 showed 「…▲0▼0」).
+
 ## 0.5.2 — 2026-10-27
 
 - **▲▼ are back**, on the list rows and under every post in the pane. They are the site's own: its handler sends the vote and the counts follow its answer. The site's setting that hides them hides them here too.
