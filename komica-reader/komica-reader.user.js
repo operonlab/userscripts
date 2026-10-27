@@ -34,7 +34,7 @@
   // <boards>
   const BOARDS_AT = '2026-10-27';
   const BOARDS = [
-    { c: '連線板', l: '2CAT', u: 'https://2cat.uk/', s: 'ok' },
+    { c: '連線板', l: '2CAT', u: 'https://2cat.uk/', s: 'ok', p: 'https://2cat.komica1.org/' },
     { c: '連線板', l: '貓管理部', u: 'https://2cat.komica1.org/0d/fstyle.html', s: 'down' },
     { c: '連線板', l: '站務公告', u: 'https://komica.blogspot.com/', s: 'ok' },
     { c: '連線板', l: '動畫', u: 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB', s: 'ok' },
@@ -237,14 +237,14 @@
     { c: '聊天室', l: 'BarGiko', u: 'http://l4cs.jpn.org/gikopoi/', s: 'ok' },
     { c: '聊天室', l: 'IRC', u: 'irc://irc.freenode.net/2cat', s: 'ok' },
     { c: '聊天室', l: '(Web)', u: 'https://2cat.komica1.org/~rt/irc/', s: 'down' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '動畫裡', u: 'https://cat.2nyan.org/hanime/', s: 'ok' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '成人玩具', u: 'https://cat.2nyan.org/toy/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '動畫裡', u: 'https://cat.2nyan.org/hanime/', s: 'ok', p: 'https://2cat.org/~hanime/' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '成人玩具', u: 'https://cat.2nyan.org/toy/', s: 'ok', p: 'https://2cat.org/~toy/' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '東方裡', u: 'https://2cat.org/touhoux/', s: 'ok' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://cat.2nyan.org/futa/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '偽娘裡', u: 'https://cat.2nyan.org/futa/', s: 'ok', p: 'https://2cat.org/~futa/' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '詢問裡', u: 'https://majeur.zawarudo.org/demande/', s: 'ok' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://cat.2nyan.org/know/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: '知識裡', u: 'https://cat.2nyan.org/know/', s: 'ok', p: 'https://2cat.org/~know/' },
     { c: '▶ KOMICA2 (18禁) [鎖定]', l: '高解析裡', u: 'https://2cat.org/~hisoura/', s: 'ok', f: 'https://2cat.org/hiso/' },
-    { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://cat.2nyan.org/gifura/', s: 'ok' },
+    { c: '▶ KOMICA2 (18禁) [鎖定]', l: 'GIF裡', u: 'https://cat.2nyan.org/gifura/', s: 'ok', p: 'https://2cat.org/~gifura/' },
     { c: '外部連結', l: '0rz.tw', u: 'http://0rz.tw/', s: 'ok' },
     { c: '外部連結', l: 'Google 日本', u: 'https://www.google.co.jp/ja', s: 'ok' },
     { c: '外部連結', l: 'goo 辞書', u: 'https://dictionary.goo.ne.jp/', s: 'down' },
@@ -275,10 +275,16 @@
     }
   }
 
+  // a board answers to where it links (u), where that lands after a redirect (f) and where the portal still points (p)
+  function knownBoard(href, boards) {
+    const normalized = normalizeBoardUrl(href);
+    return normalized ? boards.find((board) => [board.u, board.f, board.p].some((url) => url && normalizeBoardUrl(url) === normalized)) || null : null;
+  }
+
   function matchBoard(href, boards) {
     const normalized = normalizeBoardUrl(href);
     if (!normalized) return null;
-    const exact = boards.find((board) => normalizeBoardUrl(board.u) === normalized || (board.f && normalizeBoardUrl(board.f) === normalized));
+    const exact = knownBoard(normalized, boards);
     if (exact) return exact;
     const url = new URL(normalized);
     if (url.origin !== 'https://gaia.komica1.org' || !url.pathname.startsWith('/00b/')) return null;
@@ -393,7 +399,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -883,7 +889,6 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   function portalBoards() {
-    const statuses = new Map(BOARDS.map((board) => [normalizeBoardUrl(board.u), board.s]));
     const boards = [];
     let category = '';
     for (const item of document.querySelectorAll('li')) {
@@ -895,8 +900,9 @@ html.kr-portal .kr-side { border-right: 0; }
       for (const link of item.querySelectorAll(':scope > a[href]')) {
         const href = link.getAttribute('href');
         if (!href || href === '#' || /^javascript:/i.test(href)) continue;
-        const url = link.href;
-        boards.push({ c: category, l: link.textContent.trim(), u: url, s: statuses.get(normalizeBoardUrl(url)) || 'ok' });
+        // a board that moved off the address the portal still has links to where it lives now
+        const known = knownBoard(link.href, BOARDS);
+        boards.push({ c: category, l: link.textContent.trim(), u: known?.u || link.href, s: known?.s || 'ok' });
       }
     }
     return boards;

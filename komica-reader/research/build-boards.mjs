@@ -17,7 +17,8 @@ for (const board of survey.boards) {
 const entries = survey.portal.menu_links
   .filter(({ category, href, in_menu_item }) => in_menu_item && category !== '主題選擇' && href && href !== '#' && !/^javascript:/i.test(href))
   .map(({ category, label, href }) => {
-    if (moved.has(href)) return { c: category, l: label, u: moved.get(href), s: 'ok' };
+    // p: the address the portal still links to, so the portal's own menu finds the board too
+    if (moved.has(href)) return { c: category, l: label, u: moved.get(href), s: 'ok', p: href };
     const status = statuses.get(href);
     return { c: category, l: label, u: href, s: status === 'unreachable' ? 'down' : 'ok', f: finals.get(href) };
   });
@@ -28,7 +29,7 @@ const at = source.indexOf(begin);
 const after = source.indexOf(end, at + begin.length);
 if (at < 0 || after < 0 || source.indexOf(begin, at + 1) >= 0) throw new Error('Expected one boards block');
 const quote = (value) => `'${JSON.stringify(value).slice(1, -1).replace(/'/g, "\\'")}'`;
-const lines = entries.map((board) => `    { c: ${quote(board.c)}, l: ${quote(board.l)}, u: ${quote(board.u)}, s: ${quote(board.s)}${board.f ? `, f: ${quote(board.f)}` : ''} },`).join('\n');
+const lines = entries.map((board) => `    { c: ${quote(board.c)}, l: ${quote(board.l)}, u: ${quote(board.u)}, s: ${quote(board.s)}${board.f ? `, f: ${quote(board.f)}` : ''}${board.p ? `, p: ${quote(board.p)}` : ''} },`).join('\n');
 const block = `${begin}  const BOARDS_AT = '${survey.generated_at.slice(0, 10)}';\n  const BOARDS = [\n${lines}\n  ];\n`;
 const next = source.slice(0, at) + block + source.slice(after);
 if (process.argv.includes('--check')) {

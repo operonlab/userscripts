@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -37,6 +37,13 @@ test('a board that redirects is found from the address it lands on', () => {
   const moved = [...boards, { c: '連線二板', l: '職業', u: 'https://2cat.org/~career/', s: 'ok', f: 'https://2cat.org/career/' }];
   for (const href of ['https://2cat.org/career/', 'https://2cat.org/career/index.php', 'https://2cat.org/~career/']) assert.equal(matchBoard(href, moved), moved[3]);
   assert.equal(matchBoard('https://2cat.org/careers/', moved), null);
+});
+
+test("a board that moved is found from the portal's old link and links to its new address", () => {
+  const moved = [...boards, { c: '18禁', l: '動畫裡', u: 'https://cat.2nyan.org/hanime/', s: 'ok', p: 'https://2cat.org/~hanime/' }];
+  assert.equal(knownBoard('https://2cat.org/~hanime/', moved)?.u, 'https://cat.2nyan.org/hanime/');
+  assert.equal(knownBoard('https://cat.2nyan.org/hanime/index.htm', moved), moved[3]);
+  assert.equal(knownBoard('https://2cat.org/~toy/', moved), null);
 });
 
 test('board filtering matches label or category without case or surrounding spaces', () => {

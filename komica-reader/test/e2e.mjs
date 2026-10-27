@@ -382,6 +382,12 @@ try {
     }
     const portal = { ...(await page.evaluate(() => ({ cols: document.querySelector('frameset')?.cols }))), menu: state };
     check('portal: menu frame has sidebar and frameset starts at 248px', portal.menu.side && portal.cols?.startsWith('248,'), JSON.stringify(portal));
+    // the portal still links 2CAT to a dead host; the sidebar takes the board to where it lives now
+    const movedRow = await menu.evaluate(() => {
+      const a = [...document.querySelectorAll('.kr-side-row a')].find((n) => n.textContent === '2CAT');
+      return a ? { href: a.getAttribute('href'), tag: a.closest('.kr-side-row').querySelector('.kr-side-tag')?.textContent || null } : null;
+    });
+    check('portal: a board that moved links to its new address, untagged', movedRow?.href === 'https://2cat.uk/' && movedRow.tag === null, JSON.stringify(movedRow));
     await menu.locator('.kr-side-row a[href="https://gaia.komica1.org/00b/index.htm"]').first().click();
     const cont = page.frame({ name: 'cont' });
     await cont.waitForURL(/gaia\.komica1\.org\/00b\//, { timeout: 30000 });
