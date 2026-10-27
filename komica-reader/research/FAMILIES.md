@@ -62,6 +62,8 @@
 | 串號隱藏欄位 | `input[type="hidden"][name="resto"]` | 觀察：career 串頁 |
 | CAPTCHA | career 樣本未見 Turnstile 或 reCAPTCHA；其他板未知 | 觀察：career 板頁 |
 | frame policy | career 樣本無 XFO、無 CSP `frame-ancestors` | 觀察：JSON 回應標頭 |
+| 長串分頁 | 串頁預設開在**最後一頁**；`#page_switch` 列出 `[0] … [<b>目前</b>]`。舊版版型（career）參數是 `?res=N&page_num=P`，新版版型（cellphone）是 `?res=N&page=P`。新版的 `page=all`（標「顯示最後10頁」）**只回最新 100 則**，不是全串：要全串得逐頁抓 | 實測 2026-10-27：cellphone No.35532 列表 327 則，`page=all` 101 個 `id="rN"`，`page=0..10` 聯集 328；career No.79194 列表 70 則，`page_num=0..2` 聯集 71 |
+| 新版版型的外框 | 新版（2cat.uk／2cat.org cellphone）把整頁包在執行期產生的 `#scroller`（`position:absolute; left:0; right:0`），body 的邊距對它無效 | 實測 2026-10-27，computed style |
 
 ## Tinyboard/vichan
 
