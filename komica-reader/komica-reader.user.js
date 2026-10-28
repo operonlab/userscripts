@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.7.0
+// @version      0.7.1
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab
@@ -878,6 +878,9 @@ html.kr .kr-side-search:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--k
 html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 16px; }
 html.kr .kr-side-mine { flex: none; margin: 0 0 4px; padding: 0 8px 6px; border-bottom: .5px solid var(--kr-sep); }
 html.kr .kr-side-mine .kr-side-group-toggle { cursor: default; }
+/* 個人中心: laid out as a board, its own content as the site draws it (its 回到版面 bar folded into the ⋯ menu) */
+html.kr-center #banner { display: none !important; }
+html.kr-center .kr-center-row.kr-selected { outline: 2px solid var(--kr-accent); outline-offset: -2px; }
 html.kr .kr-side-group { margin-bottom: 4px; }
 html.kr .kr-side-group-toggle { width: 100%; padding: 10px 6px 4px; border: 0; background: none; text-align: left; font-size: 11px !important;
   font-weight: 600 !important; color: var(--kr-text2) !important; }
@@ -1188,7 +1191,8 @@ html.kr-portal .kr-side { border-right: 0; }
     const siteDark = select ? select.value === 'dark.css' : /dark/i.test(link?.getAttribute('href') || '');
     // no selector yet (the page still arriving) or at all: the site's dark stylesheet is its choice
     const siteChose = select ? select.value !== '' : siteDark;
-    const dark = siteChose ? siteDark : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    // 個人中心's content keeps the site's colours, its 夜間 included: around it the frame follows the site alone
+    const dark = siteChose || isCenter() ? siteDark : window.matchMedia('(prefers-color-scheme: dark)').matches;
     root.toggleAttribute('data-kr-dark', dark);
   }
 
@@ -2031,6 +2035,8 @@ html.kr-portal .kr-side { border-right: 0; }
     const reply = el('button', { type: 'button', class: 'kr-btn kr-primary', title: '回覆這串' }, '✎ 回覆');
     const newtab = el('a', { class: 'kr-btn', target: '_blank', rel: 'noopener', title: '在新分頁開啟（檢舉、編輯在那裡）' }, '↗');
     const reload = el('button', { type: 'button', class: 'kr-btn', title: '重新載入這串' }, '↻');
+    // a page without the site's form (個人中心) replies on the thread's own page
+    if (!composer.form) reply.title = '到這串的頁面回覆（新分頁）';
     actions.append(reply, newtab, reload);
     const close = el('button', { type: 'button', class: 'kr-btn kr-pane-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
     const fresh = el('button', { type: 'button', class: 'kr-pane-new', hidden: '' });
@@ -2115,6 +2121,7 @@ html.kr-portal .kr-side { border-right: 0; }
     reload.addEventListener('click', () => p.res && openThread(p.res, { fresh: true }));
     reply.addEventListener('click', () => {
       if (!p.res) return;
+      if (!composer.form) return void window.open(threadUrl(p.res), '_blank', 'noopener');
       composerReply(p.res);
       expand(true);
     });
@@ -2210,7 +2217,7 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   function selectCard(res) {
-    for (const n of document.querySelectorAll('#threads .thread.kr-selected')) n.classList.remove('kr-selected');
+    for (const n of document.querySelectorAll('#threads .thread.kr-selected, .kr-center-row.kr-selected')) n.classList.remove('kr-selected');
     document.querySelector(`#threads .thread[data-no="${res}"]`)?.classList.add('kr-selected');
   }
 
@@ -2448,12 +2455,13 @@ html.kr-portal .kr-side { border-right: 0; }
   }
 
   // ---- the board page's own header, folded into a toolbar
-  function setupToolbar() {
+  // page: the name of a page of the board's own (個人中心), shown over the board's name as a category view's is
+  function setupToolbar(page = '') {
     const header = document.getElementById('header');
     const bar = el('div', { class: 'kr-toolbar' });
     const titles = el('div', { class: 'kr-toolbar-titles' });
     const boardName = header?.querySelector('h1')?.textContent.trim() || document.title;
-    const view = new URL(location.href).searchParams.get('c');
+    const view = page || new URL(location.href).searchParams.get('c');
     titles.append(el('span', { class: 'kr-toolbar-title' }, view || boardName));
     if (view) titles.append(el('span', { class: 'kr-toolbar-sub' }, boardName));
     const online = document.getElementById('online-counter');
@@ -2466,7 +2474,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const refresh = el('a', { class: 'kr-btn', href: location.href.split('#')[0], title: '重新整理' }, '↻');
     const more = el('button', { type: 'button', class: 'kr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: '更多' }, '⋯');
     const menu = el('div', { class: 'kr-menu', role: 'menu', hidden: '' });
-    for (const a of header?.querySelectorAll('#toplink a[href]') || []) {
+    for (const a of [...(header?.querySelectorAll('#toplink a[href]') || []), ...(page ? document.querySelectorAll('#banner a[href]') : [])]) {
       const item = el('a', { href: a.getAttribute('href'), role: 'menuitem' }, a.textContent.trim());
       if (a.target) item.target = a.target;
       menu.append(item);
@@ -2484,7 +2492,7 @@ html.kr-portal .kr-side { border-right: 0; }
       const key = boardKey(location.href);
       if (!key) return;
       store.set('kr.off', [...new Set([...offBoards(), key])]);
-      location.reload();
+      reloadPage();
     });
     menu.append(el('div', { class: 'kr-menu-sep' }), original);
     const toggleMenu = (open) => {
@@ -2495,13 +2503,13 @@ html.kr-portal .kr-side { border-right: 0; }
     document.addEventListener('click', (e) => {
       if (!menu.hidden && !menu.contains(e.target) && !more.contains(e.target)) toggleMenu(false);
     });
-    bar.append(titles, write, refresh, more, menu);
+    bar.append(titles, ...(composer.form ? [write] : []), refresh, more, menu);
     document.body.prepend(bar);
   }
 
   // 追蹤 is the site's own: its 個人中心 lists the threads one has posted in (參與討論) and the posts one has liked
   // (按讚留言), and its 圖書館 keeps threads. The sidebar points there, with the links the site's own header has (綜合
-  // has them; 2cat does not)
+  // has them; 2cat does not); 個人中心 opens framed by the reader (initCenter), the one being read marked
   function setupMine() {
     const side = document.querySelector('.kr-side');
     const link = (load) => document.querySelector(`#header #toplink a[href*="load=${load}"]`)?.getAttribute('href');
@@ -2509,11 +2517,18 @@ html.kr-portal .kr-side { border-right: 0; }
     if (!side || !center || side.querySelector('.kr-side-mine')) return;
     const section = el('section', { class: 'kr-side-mine', 'aria-label': '我的（站方個人中心）' });
     section.append(el('div', { class: 'kr-side-group-toggle', title: '站方的個人中心與圖書館' }, '我的'));
+    const here = new URL(location.href).searchParams;
     for (const [label, href] of [['參與討論', `${center}&view=threads`], ['按讚留言', `${center}&view=likes`], ['圖書館', link('mod_library')]]) {
       if (!href) continue;
       const row = el('div', { class: 'kr-side-row' });
       // as the board links: inside another site's frame the page opens as itself, its cookies and storage working
-      row.append(el('a', { href, target: framedElsewhere(href) ? '_top' : '_self' }, label));
+      const a = el('a', { href, target: framedElsewhere(href) ? '_top' : '_self' }, label);
+      const there = new URL(href, location.href).searchParams;
+      if (there.get('load') === here.get('load') && there.get('view') === here.get('view')) {
+        row.setAttribute('aria-current', 'page');
+        a.setAttribute('aria-current', 'page');
+      }
+      row.append(a);
       section.append(row);
     }
     side.querySelector('.kr-side-head').after(section);
@@ -2644,6 +2659,39 @@ html.kr-portal .kr-side { border-right: 0; }
     );
   }
 
+  // the site's 個人中心 page (load=mod_islandersync: 參與討論, 按讚留言 and its other tabs), at its own address or as the
+  // answer to the POST its address sends
+  function isCenter() {
+    return /[?&]load=mod_islandersync(?:&|$)/.test(location.search);
+  }
+
+  // a 個人中心 page is the answer to a POST: reloaded, the browser would offer to send that again. Asked for anew by its
+  // address, it is the page that sends it itself
+  const reloadPage = () => (isCenter() ? location.assign(location.href.split('#')[0]) : location.reload());
+
+  // 個人中心 stays the site's own page: the reader frames it as a board, with the sidebar, a toolbar for its header and
+  // the pane, where a thread its lists link to opens. Its lists come from that POST, which no test sends, so nothing
+  // here reads their markup: a link to a thread on this board is enough
+  function initCenter() {
+    root.classList.add('kr-md', 'kr-center');
+    if ((window.name !== 'cont' || window.top === window) && !document.querySelector('.kr-side')) setupSidebar(BOARDS);
+    setupToolbar(document.querySelector('#banner .bar_admin')?.textContent.trim() || '個人中心');
+    setupMine();
+    setupPane();
+    window.addEventListener('click', (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target.closest?.('a[href]');
+      // a list row may open its thread in a new tab: the pane is the reader's place for it all the same (↗ is there)
+      if (!a || (a.target && !/^_(self|blank)$/.test(a.target)) || a.closest('.kr-side, .kr-toolbar, .kr-pane, .kr-preview')) return;
+      const link = threadLink(a.getAttribute('href'), location.href);
+      if (!link) return;
+      // the navigation only: the site's own handlers on the link still run
+      e.preventDefault();
+      openThread(link.res, { post: link.post });
+      (a.closest('li') || a).classList.add('kr-center-row', 'kr-selected');
+    }, true);
+  }
+
   let siteMenuEsc = false;
   function onKey(e) {
     if (e.isComposing || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -2695,10 +2743,11 @@ html.kr-portal .kr-side { border-right: 0; }
 
   // While the page is still arriving, the reader's frame comes first: a board's sidebar, and a bar with the page's name
   // and a spinner over the rest, instead of the site's page half laid out. init takes it away once the reader has the
-  // page; one that never finishes arriving shows as it is after a while. The site's own feature pages are left alone.
+  // page; one that never finishes arriving shows as it is after a while. The site's own feature pages are left alone,
+  // but for 個人中心, which the reader frames.
   let booting = false;
   function boot() {
-    if (root.classList.contains('kr-portal') || /[?&]mode=/.test(location.search)) return;
+    if (root.classList.contains('kr-portal') || (/[?&]mode=/.test(location.search) && !isCenter())) return;
     booting = true;
     root.classList.add('kr-booting');
     const show = () => {
@@ -2741,15 +2790,17 @@ html.kr-portal .kr-side { border-right: 0; }
     }
     watchTheme();
     setupComposer();
-    // an Esc that shuts one of the site's own menus (▾, ID) is for that menu, not for the thread: noted on the way
+    // an Esc that shuts one of the site's own menus (▾, ID, 個人中心's 更多) is for that menu, not for the thread: noted on the way
     // down, before the site's handler has shut it
-    window.addEventListener('keydown', (e) => (siteMenuEsc = e.key === 'Escape' && !!document.querySelector('.post-action-menu:not([hidden]), #post-id-actions:not([hidden])')), true);
+    window.addEventListener('keydown', (e) => (siteMenuEsc = e.key === 'Escape' && !!document.querySelector('.post-action-menu:not([hidden]), #post-id-actions:not([hidden]), .personal-center-tabs .pc-panel:not([hidden])')), true);
     document.addEventListener('keydown', onKey);
     if (composer.resto) {
       root.classList.add('kr-thread');
       window.addEventListener('click', (e) => onHeadNumber(e, (no) => quoteIntoComposer(no)), true);
     } else if (document.getElementById('threads')) {
       initBoard();
+    } else if (isCenter()) {
+      initCenter();
     } else {
       // not a board after all: the sidebar the frame put up goes
       document.querySelector('.kr-side')?.remove();
@@ -2797,7 +2848,7 @@ html.kr-portal .kr-side { border-right: 0; }
       back.addEventListener('click', () => {
         const key = boardKey(location.href);
         store.set('kr.off', offBoards().filter((k) => k !== key));
-        location.reload();
+        reloadPage();
       });
       document.body.append(back);
     };

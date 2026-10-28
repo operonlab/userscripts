@@ -1473,6 +1473,184 @@ try {
   }
   await sctx.close();
 
+  // 個人中心 framed: its page is the site's own, between the sidebar and the pane, and a thread its lists link to opens in
+  // the pane. Its lists come from a POST of this browser's id, which is never sent: that POST is answered here with the
+  // page its address returns, the loading box swapped for a list. The list's markup is inferred from the site's
+  // stylesheet (.is-card, .is-list, .is-row), not observed, so only what the reader does around it is checked.
+  const CENTER = 'https://gaia.komica1.org/00b/pixmicat.php?mode=module&load=mod_islandersync&view=threads';
+  const cctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW', colorScheme: 'light' });
+  await cctx.addInitScript(wrapped);
+  // the shell posts only for a browser with an id: an obviously fake one, put there on 個人中心 only and read by nothing
+  // but the POST answered below
+  await cctx.addInitScript(() => {
+    try {
+      if (location.hostname === 'gaia.komica1.org' && /[?&]load=mod_islandersync/.test(location.search) && !localStorage.getItem('pugid')) localStorage.setItem('pugid', 'kr-e2e-not-a-real-id');
+    } catch {
+      /* no storage: the shell says so and posts nothing */
+    }
+    // the reader's cover over the page while it arrives, seen whenever it is put up
+    window.__krBooted = false;
+    new MutationObserver((_, mo) => {
+      if (!document.querySelector('.kr-boot')) return;
+      window.__krBooted = true;
+      mo.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  let fixtureRes = null;
+  let fixtureBuilt = false;
+  await cctx.route(/^https:\/\/gaia\.komica1\.org\//, async (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && q.isNavigationRequest() && /[?&]load=mod_islandersync(?:&view=\w+)?$/.test(q.url()) && fixtureRes) {
+      const shell = await (await cctx.request.get(q.url())).text();
+      const list = `<div class="is-wrap"><section class="is-card" data-kr-fixture="1"><h2>參與討論</h2><ul class="is-list">`
+        + `<li><div class="is-row"><a href="pixmicat.php?res=${fixtureRes}">e2e 測試清單</a><strong>1 則新回應<span class="is-unread">1</span></strong></div>`
+        + `<div class="is-summary"><div class="is-copy"><p>測試用的清單，不是站方的回應</p></div></div></li>`
+        + `<li><div class="is-row"><a href="pixmicat.php?res=${fixtureRes}#r${fixtureRes}" target="_blank">同一串，指到首篇</a><strong>0</strong></div></li></ul></section></div></body>`;
+      const body = shell.replace(/<div class="is-wrap">[\s\S]*<\/div>\s*<\/body>/, list);
+      fixtureBuilt = body !== shell;
+      return r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body });
+    }
+    return q.method() === 'GET' && !/mod_report/.test(q.url()) ? r.continue() : r.abort();
+  });
+  const kp = await cctx.newPage();
+  const navs = [];
+  kp.on('request', (q) => q.isNavigationRequest() && q.frame() === kp.mainFrame() && navs.push(q.method()));
+  // across the shell's own navigation to its POST's answer: asked again until it holds or time runs out
+  const settle = async (pred, arg, ms = 20000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await kp.waitForTimeout(250)) if (await kp.evaluate(pred, arg).catch(() => false)) return true;
+    return false;
+  };
+  await kp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  fixtureRes = await kp.waitForSelector('#threads .thread[data-no]', { timeout: 20000 }).then(() => kp.evaluate(() => document.querySelector('#threads .thread[data-no]').dataset.no), () => null);
+  navs.length = 0;
+  await kp.goto(CENTER, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+  const centerUp = fixtureRes && await settle(() => !!document.querySelector('[data-kr-fixture]') && !!document.querySelector('.kr-toolbar') && !!document.querySelector('.kr-pane'));
+  if (centerUp && fixtureBuilt) {
+    const frame = await kp.evaluate(() => {
+      const shown = (n) => !!n && n.getBoundingClientRect().height > 0 && getComputedStyle(n).visibility !== 'hidden';
+      const side = document.querySelector('.kr-side');
+      const wrap = document.querySelector('.is-wrap');
+      return {
+        side: shown(side),
+        title: document.querySelector('.kr-toolbar-title')?.textContent,
+        sub: document.querySelector('.kr-toolbar-sub')?.textContent,
+        write: [...document.querySelectorAll('.kr-toolbar .kr-btn')].some((b) => /發新串/.test(b.textContent)),
+        mine: [...document.querySelectorAll('.kr-side-mine .kr-side-row')].map((r) => [r.textContent, r.getAttribute('aria-current')]),
+        banner: getComputedStyle(document.getElementById('banner')).display,
+        backInMenu: [...document.querySelectorAll('.kr-menu a')].some((a) => a.textContent.trim() === '回到版面'),
+        tabs: shown(document.querySelector('.personal-center-tabs')),
+        wrap: shown(wrap),
+        items: document.querySelectorAll('[data-kr-fixture] .is-list li').length,
+        beside: !!side && !!wrap && wrap.getBoundingClientRect().left >= side.getBoundingClientRect().right,
+        booted: window.__krBooted,
+        cover: !!document.querySelector('.kr-boot'),
+      };
+    });
+    check('個人中心: while it arrives the reader\'s frame covers it, as on a board, and is gone once it is in', frame.booted && !frame.cover, JSON.stringify({ booted: frame.booted, cover: frame.cover }));
+    check('個人中心: framed by the reader — the sidebar with 參與討論 marked, a toolbar named 個人中心 without 發新串 (no form here), its 回到版面 in the ⋯ menu',
+      frame.side && frame.title === '個人中心' && /綜合/.test(frame.sub || '') && !frame.write && frame.banner === 'none' && frame.backInMenu
+        && JSON.stringify(frame.mine.filter(([, c]) => c === 'page')) === JSON.stringify([['參與討論', 'page']]), JSON.stringify(frame));
+    check('個人中心: the site\'s own page stays, reached by its own POST — its tabs and its list shown beside the sidebar, nothing taken out',
+      navs.includes('POST') && frame.tabs && frame.wrap && frame.items === 2 && frame.beside, JSON.stringify({ navs, ...frame }));
+
+    // what the click did is read after the reader and the site (a listener on the link) had it; the page is kept here
+    // either way, so a click the reader let through shows as not prevented rather than as a page gone
+    await kp.evaluate(() => {
+      window.__krClick = { prevented: null, siteSaw: false };
+      document.querySelector('[data-kr-fixture] li a').addEventListener('click', () => (window.__krClick.siteSaw = true));
+      window.addEventListener('click', (e) => {
+        window.__krClick.prevented = e.defaultPrevented;
+        e.preventDefault();
+      });
+    });
+    const navsBefore = navs.length;
+    await kp.locator('[data-kr-fixture] li a').first().click();
+    await kp.waitForSelector('.kr-pane .kr-post', { timeout: 20000 }).catch(() => null);
+    const inPane = await kp.evaluate(() => ({
+      open: document.documentElement.classList.contains('kr-pane-open'),
+      sub: document.querySelector('.kr-pane-sub')?.textContent,
+      posts: document.querySelectorAll('.kr-pane .kr-post').length,
+      url: location.href,
+      selected: !!document.querySelector('[data-kr-fixture] li.kr-selected'),
+      ...window.__krClick,
+    }));
+    check('個人中心: a thread its list links to opens in the pane, the reader taking its navigation, the site\'s own handler on the link still run',
+      inPane.open && (inPane.sub || '').includes(`No.${fixtureRes}`) && inPane.posts > 0 && inPane.url === CENTER && navs.length === navsBefore && inPane.prevented === true && inPane.siteSaw && inPane.selected,
+      JSON.stringify({ ...inPane, navs: navs.slice(navsBefore) }));
+    // a row that opens its thread in a new tab, at a post: the pane, at that post
+    await kp.evaluate(() => (window.__krClick.prevented = null));
+    await kp.locator('[data-kr-fixture] li a[target="_blank"]').click();
+    await kp.waitForTimeout(400);
+    const atPost = await kp.evaluate((no) => ({ prevented: window.__krClick.prevented, open: document.documentElement.classList.contains('kr-pane-open'),
+      flashed: !!document.querySelector(`.kr-pane #kr-p${no}.kr-flash`) }), fixtureRes);
+    check('個人中心: a row that would open a new tab (target=_blank), with a post in it, opens in the pane at that post', atPost.prevented === true && atPost.open && atPost.flashed, JSON.stringify(atPost));
+    const tabLet = await kp.evaluate(() => {
+      window.__krClick.prevented = null;
+      document.querySelector('.personal-center-tabs a[href*="view=likes"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+      return window.__krClick.prevented;
+    });
+    check('個人中心: a link that is no thread (its 按讚留言 tab) is left to the browser', tabLet === false, String(tabLet));
+
+    const replyTitle = await kp.evaluate(() => document.querySelector('.kr-pane-actions .kr-primary')?.title);
+    const pop = await Promise.all([cctx.waitForEvent('page', { timeout: 10000 }), kp.locator('.kr-pane-actions .kr-primary').click()]).then(([p]) => p, () => null);
+    const popUrl = pop && await pop.waitForURL(/res=/, { timeout: 10000 }).then(() => pop.url(), () => pop.url());
+    await pop?.close();
+    check('個人中心: with no form on the page, ✎ 回覆 opens the thread\'s own page (where the form is) in a new tab',
+      replyTitle === '到這串的頁面回覆（新分頁）' && new RegExp(`[?&]res=${fixtureRes}(?:\\D|$)`).test(popUrl || ''), JSON.stringify({ replyTitle, popUrl }));
+
+    // its content follows only the site's own 夜間, so around it the frame does too: the system turning dark changes nothing
+    await kp.emulateMedia({ colorScheme: 'dark' });
+    await kp.waitForTimeout(300);
+    const theme = await kp.evaluate(() => ({ site: document.getElementById('theme-selector')?.value, dark: document.documentElement.hasAttribute('data-kr-dark') }));
+    await kp.emulateMedia({ colorScheme: 'light' });
+    // and the site's own 夜間 (this context's choice only) turns it dark
+    const pick = (value) => kp.evaluate((v) => {
+      const s = document.getElementById('theme-selector');
+      s.value = v;
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+    await pick('dark.css');
+    await kp.waitForTimeout(400);
+    const night = await kp.evaluate(() => ({ dark: document.documentElement.hasAttribute('data-kr-dark'), site: document.documentElement.dataset.komicaFilterTheme }));
+    await pick('');
+    await kp.waitForTimeout(400);
+    check('個人中心: the frame follows the site\'s theme alone — on 預設 it stays light with the system dark, on the site\'s 夜間 it is dark, as the content is',
+      theme.site === '' && !theme.dark && night.dark, JSON.stringify({ theme, night }));
+
+    // an Esc that shuts 個人中心's own 更多 panel is for that panel: the pane stays open
+    const more = kp.locator('.personal-center-tabs .pc-toggle');
+    const esc = await more.isVisible() && await more.click().then(async () => {
+      const opened = await kp.evaluate(() => !document.querySelector('.personal-center-tabs .pc-panel').hidden);
+      await kp.keyboard.press('Escape');
+      return kp.evaluate((o) => ({ opened: o, shut: document.querySelector('.personal-center-tabs .pc-panel').hidden, pane: document.documentElement.classList.contains('kr-pane-open') }), opened);
+    });
+    check('個人中心: Esc on its open 更多 panel shuts the panel, not the thread in the pane', !!esc && esc.opened && esc.shut && esc.pane, JSON.stringify(esc));
+
+    // a POST's answer reloaded would send it again: 看原站版面 and 閱讀器 ask for the address anew, a GET
+    await kp.keyboard.press('Escape');
+    await kp.evaluate(() => (window.__krOld = true));
+    navs.length = 0;
+    await kp.locator('.kr-toolbar .kr-btn[aria-haspopup="menu"]').click();
+    await kp.locator('.kr-menu .kr-menu-original').click();
+    const offPage = await settle(() => !window.__krOld && !!document.querySelector('[data-kr-fixture]') && !!document.querySelector('.kr-back-reader'))
+      && await kp.evaluate(() => ({ reader: !!document.querySelector('.kr-toolbar, .kr-side, .kr-pane'), back: !!document.querySelector('.kr-back-reader') }));
+    check('個人中心: 看原站版面 there asks for its address again (a GET, its shell posting itself), not for its POST again; the site\'s page shows as it is',
+      navs[0] === 'GET' && navs.includes('POST') && offPage && !offPage.reader && offPage.back, JSON.stringify({ navs, offPage }));
+    await kp.evaluate(() => (window.__krOld = true)).catch(() => null);
+    navs.length = 0;
+    await kp.locator('.kr-back-reader').click().catch(() => null);
+    const on = await settle(() => !window.__krOld && !!document.querySelector('[data-kr-fixture]') && !!document.querySelector('.kr-toolbar'));
+    const offAfter = await kp.evaluate(() => localStorage.getItem('kr.off')).catch(() => null);
+    check('個人中心: 閱讀器 there brings the reader back the same way (a GET first)', navs[0] === 'GET' && on && offAfter === '[]', JSON.stringify({ navs, on, offAfter }));
+  } else if (fixtureRes && fixtureBuilt) {
+    check('個人中心: framed by the reader — the sidebar with 參與討論 marked, a toolbar named 個人中心 without 發新串 (no form here), its 回到版面 in the ⋯ menu',
+      false, `its list came up without the reader around it: ${JSON.stringify(navs)}`);
+  } else {
+    console.log(`UNVERIFIABLE  個人中心: ${!fixtureRes ? 'the board did not load' : 'its POST was never answered with a list'}`);
+    code = 2;
+  }
+  await cctx.close();
+
   // on a phone (as one: its user agent and touch): nothing of the site's own page shows above the toolbar, a menu button
   // stays on the line of what it belongs to wherever a header breaks, and 2cat's own ↑ ⟳ ↓ are not under the floating form
   const mctx = await browser.newContext({ ...devices['iPhone 15 Pro'], deviceScaleFactor: 1, locale: 'zh-TW', colorScheme: 'dark' });

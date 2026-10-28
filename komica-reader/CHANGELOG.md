@@ -3,6 +3,11 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.7.1 — 2026-10-28
+
+- **個人中心 opens inside the reader (綜合).** 參與討論, 按讚留言 and the other tabs of 個人中心 used to drop the reader and show the site's page alone. They now keep the sidebar (with the page you are on marked under 我的) and the reader's bar, and a thread in their lists opens in the side pane, so you stay on the list. The lists themselves are the site's own, as it draws them. ✎ 回覆 in the pane opens the thread's own page in a new tab, since 個人中心 has no reply form. 個人中心 follows the site's 夜間 setting rather than the system's, as its own content does.
+- 看原站版面 and 閱讀器 on a 個人中心 page no longer make the browser offer to send its form again.
+
 ## 0.7.0 — 2026-10-28
 
 - **The open thread updates itself (自動更新回文).** While a thread is open and the tab is in front, the reader asks for it again every 30 seconds (every minute, then every two, while nothing new comes) and adds new replies at the end. What is already on screen is left as it is, so a video keeps playing. A line marks the first new reply, and a small 「↓ N 則新回應」 button under the thread's bar takes you there. A tab in the background asks for nothing until you come back to it.
