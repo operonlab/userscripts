@@ -262,14 +262,19 @@ try {
   // the quote is an unsent draft: it stays a reply to the thread it was written in
   check('composer: an unsent draft keeps replying to its thread after the thread closes', !kept.disabled && kept.value === String(target), JSON.stringify(kept));
 
-  // thumbnail, [回應], j
-  const thumb = page.locator(`#threads .thread[data-no="${target}"] .threadpost .file-thumb img`);
-  if (await thumb.count()) {
-    await thumb.first().click();
+  // thumbnail, [回應], j. A plain thumbnail: the cover the site lays over a [hidepix] one takes the click itself
+  const thumbRes = await page.evaluate((t) => {
+    const plain = (card) => !!card?.querySelector('.threadpost .file-thumb img') && !card.querySelector('.threadpost .media-spoiler-cover');
+    return plain(document.querySelector(`#threads .thread[data-no="${t}"]`)) ? t : Number([...document.querySelectorAll('#threads .thread')].find(plain)?.dataset.no) || null;
+  }, target);
+  if (thumbRes) {
+    await page.locator(`#threads .thread[data-no="${thumbRes}"] .threadpost .file-thumb img`).first().click();
     await page.waitForSelector('.kr-pane .kr-post', { timeout: 5000 }).catch(() => null);
-    const t = await page.evaluate((res) => ({ open: document.querySelector('.kr-pane-sub').textContent.includes(`No.${res}`), expanded: !!document.querySelector(`#threads .thread[data-no="${res}"] .threadpost .-expanded`) }), target);
-    check('list: an OP thumbnail opens the thread rather than expanding the image in the row', t.open && !t.expanded, JSON.stringify(t));
+    const t = await page.evaluate((res) => ({ open: document.querySelector('.kr-pane-sub').textContent.includes(`No.${res}`), expanded: !!document.querySelector(`#threads .thread[data-no="${res}"] .threadpost .-expanded`) }), thumbRes);
+    check('list: an OP thumbnail opens the thread rather than expanding the image in the row', t.open && !t.expanded, JSON.stringify({ res: thumbRes, ...t }));
     await page.keyboard.press('Escape');
+  } else {
+    console.log('NOTE  list: no row on page 1 has a plain OP thumbnail; the thumbnail click was not exercised');
   }
   // another thread than the one the draft is for
   // (a [回應] that names a thread: the board can carry one that does not)
