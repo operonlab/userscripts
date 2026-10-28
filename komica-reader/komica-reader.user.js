@@ -2,7 +2,7 @@
 // @name         Komica Reader
 // @name:zh-TW   K島閱讀改善
 // @namespace    https://github.com/operonlab/userscripts
-// @version      0.6.7
+// @version      0.7.0
 // @description  A three-column reader for Komica's 綜合 board, the 2cat boards and the portal, in a macOS style: boards, threads, and the thread itself with full-size images, opening at once; the post form floats over it.
 // @description:zh-TW  K島綜合版、2cat 各板與入口改成 macOS 風格三欄閱讀：板塊、串列表、串內容（大圖直接顯示、點下去立刻出現），發文／回文表單浮在旁邊。
 // @author       operonlab

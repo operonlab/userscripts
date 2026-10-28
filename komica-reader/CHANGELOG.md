@@ -3,6 +3,12 @@
 
 Userscript managers update a script only when `@version` goes up, so every version you can receive is listed here.
 
+## 0.7.0 — 2026-10-28
+
+- **The open thread updates itself (自動更新回文).** While a thread is open and the tab is in front, the reader asks for it again every 30 seconds (every minute, then every two, while nothing new comes) and adds new replies at the end. What is already on screen is left as it is, so a video keeps playing. A line marks the first new reply, and a small 「↓ N 則新回應」 button under the thread's bar takes you there. A tab in the background asks for nothing until you come back to it.
+- **原站版面, for one board.** The toolbar's ⋯ menu has 「看原站版面（這個板）」: that board shows the site's own page from then on, with a 「閱讀器」 button at its bottom left to bring the reader back. Other boards keep the reader.
+- **我的, in the sidebar (綜合).** 綜合 already keeps the threads you have posted in and the posts you have liked (個人中心: 參與討論, 按讚留言), and its 圖書館 keeps threads. The sidebar now links those pages, at the top.
+
 ## 0.6.7 — 2026-10-28
 
 - **On a phone, a post's ▾ stays beside its number.** A dated post header is too long for a phone's width and breaks in two, and the ▾ (or the ⋯ beside an ID) often landed alone at the start of the next line, looking like it belonged to nothing. The number and its ▾ now move to the next line together, and so do an ID and its ⋯.
