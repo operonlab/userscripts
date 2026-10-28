@@ -459,8 +459,20 @@
     return fetched.filter((p) => p.no > newest && !have.has(p.no) && !seen.has(p.no) && seen.add(p.no)).sort((a, b) => a.no - b.no);
   }
 
+  // which board a page belongs to, for remembering 原站版面 per board: the host and the board's directory, so its
+  // pages, category views and threads share it (2cat answers /~career/ as /career/)
+  function boardKey(href) {
+    try {
+      const url = new URL(href);
+      if (!/^https?:$/.test(url.protocol)) return null;
+      return `${url.hostname}/${/^\/~?([^/]+)\//.exec(url.pathname)?.[1] || ''}`;
+    } catch {
+      return null;
+    }
+  }
+
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, boardKey, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -2434,6 +2446,16 @@ html.kr-portal .kr-side { border-right: 0; }
       row.append(theme);
       menu.append(el('div', { class: 'kr-menu-sep' }), row);
     }
+    // the site's own page for this board, from now on; a button on it brings the reader back
+    const original = el('a', { href: location.href, role: 'menuitem', class: 'kr-menu-original' }, '看原站版面（這個板）');
+    original.addEventListener('click', (e) => {
+      e.preventDefault();
+      const key = boardKey(location.href);
+      if (!key) return;
+      store.set('kr.off', [...new Set([...offBoards(), key])]);
+      location.reload();
+    });
+    menu.append(el('div', { class: 'kr-menu-sep' }), original);
     const toggleMenu = (open) => {
       menu.hidden = !open;
       more.setAttribute('aria-expanded', String(open));
@@ -2703,9 +2725,39 @@ html.kr-portal .kr-side { border-right: 0; }
     }, { once: true });
   }
 
+  function offBoards() {
+    const list = store.get('kr.off', []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  // a board set to 原站版面 is the site's own page, untouched but for one button back to the reader (styled where it
+  // stands: none of the reader's CSS is on such a page)
+  function offerReader() {
+    const show = () => {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'kr-back-reader';
+      back.textContent = '閱讀器';
+      back.title = '這個板改回 K島閱讀改善 的版面';
+      back.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483000;padding:6px 12px;border:1px solid rgba(0,0,0,.15);border-radius:999px;'
+        + 'background:rgba(246,246,248,.92);color:#1d1d1f;font:600 12px -apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei",sans-serif;'
+        + 'box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer';
+      back.addEventListener('click', () => {
+        const key = boardKey(location.href);
+        store.set('kr.off', offBoards().filter((k) => k !== key));
+        location.reload();
+      });
+      document.body.append(back);
+    };
+    if (document.body) show();
+    else document.addEventListener('DOMContentLoaded', show, { once: true });
+  }
+
   function start() {
     // the hidden frame that receives posts loads the board too; it needs none of this
     if (window.name === 'kr-sink') return;
+    // read before anything is drawn, so the reader's frame never flashes over a board set to 原站版面
+    if (location.hostname !== 'komica1.org' && offBoards().includes(boardKey(location.href))) return offerReader();
     root = document.documentElement;
     root.classList.add('kr', location.hostname === 'komica1.org' ? 'kr-portal' : 'kr-top');
     const style = document.createElement('style');

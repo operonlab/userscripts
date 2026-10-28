@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, boardKey, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -259,4 +259,18 @@ test('only replies newer than the newest one shown go on the end, once each and 
   assert.deepEqual(nos(freshPosts([100], [{ no: 102 }, { no: 102 }, { no: 101 }])), [101, 102]); // a page listing one twice
   assert.deepEqual(nos(freshPosts(new Map([[7, {}], [9, {}]]).keys(), [{ no: 8 }, { no: 10 }])), [10]); // the pane's own map keys
   assert.deepEqual(nos(freshPosts([], [{ no: 3 }, { no: 2 }])), [2, 3]); // nothing shown yet: all of it
+});
+
+test('原站版面 is remembered per board: its pages, category views and threads share one key', () => {
+  for (const href of ['https://gaia.komica1.org/00b/index.htm', 'https://gaia.komica1.org/00b/2.htm', 'https://gaia.komica1.org/00b/pixmicat.php?res=1', 'https://gaia.komica1.org/00b/pixmicat2.php?c=%E5%8B%95%E7%95%AB']) {
+    assert.equal(boardKey(href), 'gaia.komica1.org/00b', href);
+  }
+  assert.equal(boardKey('https://2cat.org/~career/'), '2cat.org/career'); // 2cat answers /~career/ as /career/
+  assert.equal(boardKey('https://2cat.org/career/?res=79194&page_num=2'), '2cat.org/career');
+  assert.notEqual(boardKey('https://2cat.org/cellphone/'), boardKey('https://2cat.org/career/')); // another board on the same host
+  assert.notEqual(boardKey('https://2cat.uk/cellphone/'), boardKey('https://2cat.org/cellphone/')); // and the same name on another host
+  assert.equal(boardKey('https://2cat.uk/'), '2cat.uk/');
+  assert.equal(boardKey('https://2cat.uk/index.php'), '2cat.uk/'); // a file at the root is not a directory
+  assert.equal(boardKey('javascript:alert(1)'), null);
+  assert.equal(boardKey('not a url'), null);
 });

@@ -1363,6 +1363,58 @@ try {
   }
   await uctx.close();
 
+  // 原站版面: ⋯ turns the reader off for one board, from the first frame on (no reader frame flashes over it); the site's
+  // own page shows with one button back. Another board on the same host keeps the reader. Two 2cat boards, one host.
+  const octx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW', colorScheme: 'light' });
+  await octx.addInitScript(wrapped);
+  await octx.addInitScript(() => {
+    // the reader's marks at any moment while the page arrives, not only once it is in
+    window.__krSeen = 0;
+    const look = () => {
+      if (document.documentElement?.classList.contains('kr') || document.querySelector('.kr-boot, .kr-side, .kr-toolbar')) window.__krSeen++;
+      if (document.readyState !== 'complete') requestAnimationFrame(look);
+    };
+    look();
+  });
+  await octx.route(/^https:\/\/(www\.)?2cat\.org\//, (r) => (r.request().method() === 'GET' && !/mod_report/.test(r.request().url()) ? r.continue() : r.abort()));
+  const op = await octx.newPage();
+  const ONE = 'https://2cat.org/cellphone/';
+  const OTHER = 'https://2cat.org/~career/';
+  await op.goto(ONE, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  if (await op.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null)) {
+    await op.locator('.kr-toolbar .kr-btn[aria-haspopup="menu"]').click();
+    await Promise.all([op.waitForEvent('load', { timeout: 45000 }).catch(() => null), op.locator('.kr-menu .kr-menu-original').click()]);
+    await op.waitForSelector('.kr-back-reader', { timeout: 20000 }).catch(() => null);
+    await op.waitForTimeout(800);
+    const off = await op.evaluate(() => {
+      const b = document.querySelector('.kr-back-reader');
+      const r = b?.getBoundingClientRect();
+      return {
+        url: location.href,
+        seen: window.__krSeen,
+        reader: document.documentElement.classList.contains('kr') || !!document.querySelector('.kr-toolbar, .kr-side, .kr-pane, .kr-composer, #kr-style'),
+        threads: !!document.querySelector('#threads .thread, #threads .threadpost, form[name="delform"]'),
+        back: !!b && r.width > 0 && r.right <= innerWidth && r.bottom <= innerHeight && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b,
+      };
+    });
+    check('原站版面: ⋯ turns the reader off for this board — the site\'s own page, nothing of the reader drawn even while it arrived, one button back',
+      off.url.startsWith(ONE) && off.seen === 0 && !off.reader && off.threads && off.back, JSON.stringify(off));
+    await op.goto(OTHER, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+    const other = await op.waitForSelector('.kr-toolbar', { timeout: 20000 }).then(() => true, () => false);
+    const otherBack = await op.evaluate(() => !!document.querySelector('.kr-back-reader')).catch(() => null);
+    await op.goto(ONE, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+    const kept = await op.waitForSelector('.kr-back-reader', { timeout: 20000 }).then(() => true, () => false) && !(await op.evaluate(() => !!document.querySelector('.kr-toolbar')));
+    check('原站版面: another board on the same host keeps the reader, and the board set to it stays so', other && otherBack === false && kept, JSON.stringify({ other, otherBack, kept }));
+    await Promise.all([op.waitForEvent('load', { timeout: 45000 }).catch(() => null), op.locator('.kr-back-reader').click()]);
+    const back = await op.waitForSelector('.kr-toolbar', { timeout: 20000 }).then(() => true, () => false);
+    const left = await op.evaluate(() => ({ button: !!document.querySelector('.kr-back-reader'), off: localStorage.getItem('kr.off') }));
+    check('原站版面: the button brings the reader back to the board', back && !left.button && left.off === '[]', JSON.stringify({ back, ...left }));
+  } else {
+    console.log('UNVERIFIABLE  原站版面: 2cat cellphone did not load');
+    code = 2;
+  }
+  await octx.close();
+
   // on a phone (as one: its user agent and touch): nothing of the site's own page shows above the toolbar, a menu button
   // stays on the line of what it belongs to wherever a header breaks, and 2cat's own ↑ ⟳ ↓ are not under the floating form
   const mctx = await browser.newContext({ ...devices['iPhone 15 Pro'], deviceScaleFactor: 1, locale: 'zh-TW', colorScheme: 'dark' });
