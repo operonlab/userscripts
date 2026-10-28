@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -248,4 +248,15 @@ test("a file link that leaves the board's own directory is not where its files a
   assert.equal(fileBase('src/1.jpg', 'https://2cat.org/hiso/pixmicat.php?res=3'), 'https://2cat.org/hiso');
   assert.equal(fileBase('https://cat.2nyan.org/chatura/src/1.jpg', 'https://2cat.org/~chatura/'), 'https://cat.2nyan.org/chatura'); // absolute links are taken as written
   assert.equal(fileBase('pixmicat.php?res=1', 'https://2cat.org/hiso/'), null);
+});
+
+test('only replies newer than the newest one shown go on the end, once each and in order', () => {
+  const nos = (posts) => plain(posts).map((p) => p.no);
+  const page = [{ no: 100 }, { no: 101 }, { no: 103 }, { no: 105 }, { no: 104 }];
+  assert.deepEqual(nos(freshPosts([100, 101, 103], page)), [104, 105]);
+  assert.deepEqual(nos(freshPosts([100, 101, 103, 104, 105], page)), []); // nothing new
+  assert.deepEqual(nos(freshPosts([100, 103], page)), [104, 105]); // 101, older than the newest shown, would land out of order
+  assert.deepEqual(nos(freshPosts([100], [{ no: 102 }, { no: 102 }, { no: 101 }])), [101, 102]); // a page listing one twice
+  assert.deepEqual(nos(freshPosts(new Map([[7, {}], [9, {}]]).keys(), [{ no: 8 }, { no: 10 }])), [10]); // the pane's own map keys
+  assert.deepEqual(nos(freshPosts([], [{ no: 3 }, { no: 2 }])), [2, 3]); // nothing shown yet: all of it
 });

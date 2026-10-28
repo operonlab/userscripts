@@ -1259,6 +1259,110 @@ try {
   check('not a board after all: the page shows, without the frame\'s sidebar, and is not kept in 最近', !notBoard.side && !notBoard.cover && notBoard.recent === '[]' && notBoard.text.includes('checking your browser'), JSON.stringify(notBoard));
   await bctx.close();
 
+  // 自動更新回文: an open thread asks for its page again by itself and puts a new reply on the end, leaving the posts
+  // already drawn as they were (the same nodes: a video playing in one keeps playing); a tab in the background asks for
+  // nothing until it is in front again. The new reply is the test's: the second time the pane asks for the thread, the
+  // page is answered with one reply added, a copy of its last one quoting the OP.
+  const uctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'zh-TW', colorScheme: 'light' });
+  await uctx.addInitScript(wrapped);
+  await uctx.route(/^https:\/\/(gaia\.komica1\.org|(www\.)?2cat\.org)\//, (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && /^mode=edit_links&/.test(q.postData() || '')) return r.continue();
+    return q.method() === 'GET' && !/mod_report/.test(q.url()) ? r.continue() : r.abort();
+  });
+  const up = await uctx.newPage();
+  const uerrs = [];
+  up.on('pageerror', (e) => uerrs.push(String(e.message || e)));
+  await up.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  const live = await up.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null) && await up.evaluate(() => [...document.querySelectorAll('#threads .thread')]
+    .map((t) => [t.dataset.no, Number(/\d+/.exec(t.querySelector('.kr-meta-count')?.textContent || '')?.[0] || 0)]).filter((x) => x[1] >= 3).sort((a, b) => b[1] - a[1])[0]?.[0]);
+  if (live) {
+    // half a second instead of half a minute, set before the thread opens
+    await up.evaluate(() => (window.__krState.pollMs = 500));
+    const asked = [];
+    let added = null;
+    await up.route(new RegExp(`[?&]res=${live}(?:[&#]|$)`), async (r) => {
+      asked.push(Date.now());
+      if (asked.length !== 2) return r.continue();
+      const resp = await r.fetch();
+      const made = await up.evaluate(({ html, res }) => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const posts = [...doc.querySelectorAll(`#threads .thread[data-no="${res}"] .post[data-no]`)];
+        const last = posts[posts.length - 1];
+        const no = Math.max(...posts.map((p) => Number(p.dataset.no))) + 1;
+        const copy = last.cloneNode(true);
+        copy.setAttribute('data-no', String(no));
+        copy.id = `r${no}`;
+        for (const n of copy.querySelectorAll('.postvote-slot, .post-menu-toggle')) n.remove();
+        copy.querySelector('.quote').innerHTML = `<a href="#r${res}" class="qlink">&gt;&gt;${res}</a><br>kr-e2e 自動更新的新回應`;
+        last.after(copy);
+        return { html: `<!DOCTYPE html>${doc.documentElement.outerHTML}`, no };
+      }, { html: await resp.text(), res: live });
+      added = made.no;
+      return r.fulfill({ response: resp, body: made.html });
+    });
+    await up.locator(`#threads .thread[data-no="${live}"] .kr-meta-count`).click();
+    await up.waitForFunction(() => document.querySelector('.kr-pane .kr-post') && !document.querySelector('.kr-pane .kr-loading'), null, { timeout: 30000 }).catch(() => null);
+    const before = await up.evaluate(() => {
+      const arts = [...document.querySelectorAll('.kr-pane-body > .kr-post')];
+      for (const a of arts) a.dataset.e2eKept = '1';
+      const lastId = arts[arts.length - 1].dataset.id || null;
+      return { n: arts.length, lastId, sameId: lastId ? arts.filter((a) => a.dataset.id === lastId).length : 0 };
+    });
+    const grew = await up.waitForFunction(() => !!document.querySelector('.kr-new-mark'), null, { timeout: 8000 }).then(() => true, () => false);
+    const after = await up.evaluate(({ added, res }) => {
+      const arts = [...document.querySelectorAll('.kr-pane-body > .kr-post')];
+      const neu = document.getElementById(`kr-p${added}`);
+      const pill = document.querySelector('.kr-pane-new');
+      return {
+        n: arts.length,
+        kept: arts.filter((a) => a.dataset.e2eKept === '1').length,
+        last: arts[arts.length - 1]?.id === `kr-p${added}`,
+        markBefore: neu?.previousElementSibling?.classList.contains('kr-new-mark') || false,
+        pill: pill && !pill.hidden && getComputedStyle(pill).display !== 'none' ? pill.textContent : null,
+        sub: document.querySelector('.kr-pane-sub').textContent,
+        opBack: !!document.querySelector(`#kr-p${res} > .kr-backlinks a[data-no="${added}"]`),
+        idN: neu?.querySelector('.kr-id-n')?.textContent.trim() || null,
+      };
+    }, { added, res: live });
+    check('自動更新: a new reply in the open thread is added on the end, with a line above it and a pill saying so',
+      grew && !!added && after.n === before.n + 1 && after.last && after.markBefore && /↓ 1 則新回應/.test(after.pill || '') && after.sub.includes(`${after.n - 1} 則回應`), JSON.stringify({ before, after, asked: asked.length }));
+    check('自動更新: the posts already drawn stay as they were (the same nodes), not drawn again', after.kept === before.n, JSON.stringify({ kept: after.kept, of: before.n }));
+    check('自動更新: what the new reply changes in the rest of the thread follows — its quote shows under the OP, its ID\'s count goes up',
+      after.opBack && (!before.lastId || after.idN === `×${before.sameId + 1}`), JSON.stringify({ opBack: after.opBack, lastId: before.lastId, sameId: before.sameId, idN: after.idN }));
+    await up.locator('.kr-pane-new').click().catch(() => null);
+    await up.waitForTimeout(800);
+    const went = await up.evaluate(() => {
+      const mark = document.querySelector('.kr-new-mark').getBoundingClientRect();
+      const body = document.querySelector('.kr-pane-body').getBoundingClientRect();
+      return { pillHidden: document.querySelector('.kr-pane-new').hidden, markInView: mark.top >= body.top - 2 && mark.top < body.bottom };
+    });
+    check('自動更新: the pill takes the thread to the new replies and goes', went.pillHidden && went.markInView, JSON.stringify(went));
+    // a tab in the background: no asking at all over several rounds; in front again: it asks at once
+    await up.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await up.waitForTimeout(300);
+    const hiddenFrom = asked.length;
+    await up.waitForTimeout(3500);
+    const whileHidden = asked.length - hiddenFrom;
+    await up.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await up.waitForTimeout(1500);
+    const onFront = asked.length - hiddenFrom - whileHidden;
+    check('自動更新: a tab in the background asks for nothing; brought to the front it asks again', whileHidden === 0 && onFront >= 1, JSON.stringify({ whileHidden, onFront }));
+    const ours = uerrs.filter((m) => /kr[A-Z_-]|komica-reader|__krState/.test(m));
+    check('自動更新: no page errors from this script', ours.length === 0, ours.join(' | '));
+    await shot(up, '16-auto-update.png');
+  } else {
+    console.log('UNVERIFIABLE  自動更新: no thread with three or more replies on the board');
+    code = 2;
+  }
+  await uctx.close();
+
   // on a phone (as one: its user agent and touch): nothing of the site's own page shows above the toolbar, a menu button
   // stays on the line of what it belongs to wherever a header breaks, and 2cat's own ↑ ⟳ ↓ are not under the floating form
   const mctx = await browser.newContext({ ...devices['iPhone 15 Pro'], deviceScaleFactor: 1, locale: 'zh-TW', colorScheme: 'dark' });

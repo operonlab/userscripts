@@ -450,8 +450,17 @@
     }
   }
 
+  // what a thread's page holds that the pane does not yet: only posts newer than its newest go on the end (an older
+  // one it lacks, say one a deletion or a page edge kept out, would land out of order)
+  function freshPosts(known, fetched) {
+    const have = new Set(known);
+    const newest = Math.max(-Infinity, ...have);
+    const seen = new Set();
+    return fetched.filter((p) => p.no > newest && !have.has(p.no) && !seen.has(p.no) && seen.add(p.no)).sort((a, b) => a.no - b.no);
+  }
+
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -743,7 +752,7 @@ html.kr-thread body { padding-bottom: 88px !important; }
 /* detail pane: the thread, fetched and drawn here */
 html.kr .kr-pane { position: fixed; z-index: 55; top: 0; right: 0; bottom: 0; width: var(--kr-drawer-w); display: flex; flex-direction: column;
   box-sizing: border-box; background: var(--kr-bg); color: var(--kr-text); border-left: .5px solid var(--kr-sep); font-family: var(--kr-font); }
-html.kr .kr-pane-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 12px 8px 16px; box-sizing: border-box;
+html.kr .kr-pane-head { position: relative; z-index: 2; display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 12px 8px 16px; box-sizing: border-box;
   background: var(--kr-bar); backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%); border-bottom: .5px solid var(--kr-sep); }
 html.kr .kr-pane-titles { flex: 1; min-width: 0; }
 html.kr .kr-pane-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/1.3 var(--kr-font); }
@@ -814,6 +823,13 @@ html.kr .kr-loading, html.kr .kr-pane-error { padding: 18px 0; font-size: 13px; 
 html.kr .kr-pane-error { color: #ff453a; }
 html.kr .kr-pane-error .kr-btn { margin: 10px 8px 0 0; }
 html.kr .kr-more { display: flex; width: 100%; height: auto; margin: 4px 0 14px; padding: 8px 12px; }
+/* 自動更新回文: a quiet pill under the pane's bar, and a line above the first new reply */
+html.kr .kr-pane-new { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); padding: 5px 12px; border: .5px solid var(--kr-sep);
+  border-radius: 999px; background: var(--kr-glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: var(--kr-shadow);
+  color: var(--kr-accent); font: 600 12px var(--kr-font); white-space: nowrap; cursor: pointer; }
+html.kr .kr-pane-new[hidden] { display: none; }
+html.kr .kr-new-mark { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 11px; color: var(--kr-accent); }
+html.kr .kr-new-mark::before, html.kr .kr-new-mark::after { content: ''; flex: 1; border-top: .5px solid currentColor; opacity: .5; }
 html.kr .kr-preview { position: fixed; z-index: 10000; width: min(440px, 90vw); max-height: 52vh; overflow: hidden; padding: 4px 16px; box-sizing: border-box;
   border-radius: 12px; background: var(--kr-glass); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
   border: .5px solid var(--kr-sep); box-shadow: var(--kr-shadow); color: var(--kr-text); font-family: var(--kr-font); pointer-events: none; }
@@ -1788,112 +1804,134 @@ html.kr-portal .kr-side { border-right: 0; }
     return start;
   }
 
+  // one post as the pane draws it; what it takes from the rest of the thread (who replied, its ID's count) is threadMarks'
+  function postArticle(res, p, byNo) {
+    const art = el('article', { class: `kr-post${p.op ? ' kr-post-op' : ''}`, id: `kr-p${p.no}`, 'data-no': String(p.no) });
+    if (p.op && p.title && !UNTITLED.test(p.title)) art.append(el('h2', { class: 'kr-post-title' }, p.title));
+    const head = el('header', { class: 'kr-post-head' });
+    head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
+    if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
+    // a menu button wraps with what it belongs to: on a phone a dated header breaks, and a ▾ or ⋯ alone on a line reads as nobody's
+    if (p.id) {
+      const who = el('span', { class: 'kr-post-who' });
+      who.append(el('button', { type: 'button', class: 'kr-post-id', 'data-id': p.id, title: '標出這個 ID 在這串的每一篇' }, `ID:${p.id}`));
+      // the site's ID menu (搜尋此 ID、隱藏此 ID): its own script opens it on any such button
+      if (site.kind === 'gaia' && SITE_ID.test(p.id)) {
+        who.append(el('button', { type: 'button', class: 'post-id-menu-toggle kr-id-menu', 'data-post-id': p.id, 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': `ID:${p.id} 的選單`, title: '搜尋此 ID、隱藏此 ID' }, '⋯'));
+      }
+      head.append(who);
+    }
+    const end = el('span', { class: 'kr-post-end' });
+    end.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
+    // the site's ▾: its own script picks up any such button and opens its menu on it
+    if (p.menu) end.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
+    head.append(end);
+    art.append(head);
+    if (p.id) art.dataset.id = p.id;
+    if (p.vote) {
+      const fold = el('div', { class: 'kr-fold' });
+      fold.append(el('span'), el('button', { type: 'button', class: 'kr-fold-toggle' }, '展開'));
+      art.append(fold);
+    }
+    if (p.media) art.append(renderMedia(p.media));
+    const text = el('div', { class: 'kr-post-text' });
+    if (p.quote) text.append(...cleanQuote(p.quote).childNodes);
+    for (const a of text.querySelectorAll('a')) {
+      // classic boards write >>No.N as a script link, which cleanQuote has already emptied: keep it as a quote
+      const bare = /^>>\s*(?:No\.)?(\d+)$/.exec(a.textContent.trim());
+      const href = a.getAttribute('href') || (bare ? `#r${bare[1]}` : '');
+      if (!href) continue;
+      const local = /^#r(\d+)$/.exec(href);
+      const link = local ? { res, post: Number(local[1]) } : threadLink(href, location.href);
+      if (link && link.res === res && link.post && byNo.has(link.post)) {
+        a.className = 'kr-q';
+        a.dataset.no = String(link.post);
+        a.setAttribute('href', `#kr-p${link.post}`);
+        a.removeAttribute('target');
+      } else if (link) {
+        a.className = 'kr-q-thread';
+        a.dataset.res = String(link.res);
+        if (link.post) a.dataset.post = String(link.post);
+        a.removeAttribute('target');
+      } else if (!href.startsWith('#')) {
+        // anything else leaves the board: a new tab, so the list, the thread and a draft stay
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer nofollow';
+      }
+    }
+    art.append(text);
+    if (p.tags?.length) {
+      const tags = el('div', { class: 'kr-tags' });
+      // a new tab: the open thread and a draft in the form stay where they are
+      for (const t of p.tags) tags.append(el('a', { class: 'kr-tag', href: t.href, target: '_blank', rel: 'noopener' }, t.name));
+      if (p.propose) tags.append(el('a', { class: 'kr-tag-propose tagproposal-open', 'data-no': String(p.no), href: p.propose, target: '_blank', rel: 'noopener' }, '建議追加／移除標籤'));
+      art.append(tags);
+    }
+    if (p.vote) {
+      if (p.vote.no) {
+        const bar = el('div', { class: 'kr-vote' });
+        bar.append(voteSlot(p.vote));
+        art.append(bar);
+      }
+      syncFold(art, p.vote.no ? undefined : p.vote.state);
+    }
+    return art;
+  }
+
+  // what each post takes from the whole thread, worked out again whenever posts are added: who replied to it, and how
+  // many posts its ID has here, coloured by that (同串 ID, as the site used to show it), once the thread is whole (a
+  // board card holds only the latest replies, a paged 2cat thread one page: a count that would change under the reader
+  // is not shown)
+  function threadMarks() {
+    const pane = state.pane;
+    const articles = [...pane.body.querySelectorAll(':scope > .kr-post')];
+    const backs = new Map();
+    for (const art of articles) {
+      art.querySelector(':scope > .kr-backlinks')?.remove();
+      for (const q of art.querySelectorAll('.kr-post-text .kr-q[data-no]')) {
+        const to = Number(q.dataset.no);
+        if (!backs.has(to)) backs.set(to, new Set());
+        backs.get(to).add(Number(art.dataset.no));
+      }
+    }
+    const counts = new Map();
+    for (const art of articles) if (art.dataset.id) counts.set(art.dataset.id, (counts.get(art.dataset.id) || 0) + 1);
+    const focus = pane.el.dataset.focusId;
+    for (const art of articles) {
+      const from = backs.get(Number(art.dataset.no));
+      if (from) {
+        const foot = el('footer', { class: 'kr-backlinks' }, '↩ ');
+        for (const n of [...from].sort((a, b) => a - b)) foot.append(el('a', { class: 'kr-q', href: `#kr-p${n}`, 'data-no': String(n) }, `>>${n}`));
+        art.append(foot);
+      }
+      const b = art.querySelector('.kr-post-id');
+      if (b) {
+        b.querySelector('.kr-id-n')?.remove();
+        delete b.dataset.level;
+        if (pane.counted) {
+          const n = counts.get(b.dataset.id) || 1;
+          b.dataset.level = String(n >= 7 ? 3 : n >= 4 ? 2 : n >= 2 ? 1 : 0);
+          b.append(el('span', { class: 'kr-id-n' }, n > 1 ? ` ×${n}` : ' 單發'));
+        }
+      }
+      if (focus) art.classList.toggle('kr-id-focus', art.dataset.id === focus);
+    }
+  }
+
   function renderPosts(res, posts, note) {
     const pane = state.pane;
     const byNo = new Set(posts.map((p) => p.no));
     pane.posts = new Map(posts.map((p) => [p.no, p]));
-    const backs = new Map();
-    const articles = posts.map((p) => {
-      const art = el('article', { class: `kr-post${p.op ? ' kr-post-op' : ''}`, id: `kr-p${p.no}`, 'data-no': String(p.no) });
-      if (p.op && p.title && !UNTITLED.test(p.title)) art.append(el('h2', { class: 'kr-post-title' }, p.title));
-      const head = el('header', { class: 'kr-post-head' });
-      head.append(el('span', { class: 'kr-post-name' }, p.name || '無名'));
-      if (p.time) head.append(el('span', { class: 'kr-post-time' }, p.time));
-      // a menu button wraps with what it belongs to: on a phone a dated header breaks, and a ▾ or ⋯ alone on a line reads as nobody's
-      if (p.id) {
-        const who = el('span', { class: 'kr-post-who' });
-        who.append(el('button', { type: 'button', class: 'kr-post-id', 'data-id': p.id, title: '標出這個 ID 在這串的每一篇' }, `ID:${p.id}`));
-        // the site's ID menu (搜尋此 ID、隱藏此 ID): its own script opens it on any such button
-        if (site.kind === 'gaia' && SITE_ID.test(p.id)) {
-          who.append(el('button', { type: 'button', class: 'post-id-menu-toggle kr-id-menu', 'data-post-id': p.id, 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-label': `ID:${p.id} 的選單`, title: '搜尋此 ID、隱藏此 ID' }, '⋯'));
-        }
-        head.append(who);
-      }
-      const end = el('span', { class: 'kr-post-end' });
-      end.append(el('button', { type: 'button', class: 'kr-post-no', 'data-no': String(p.no), title: '引用這則並回覆' }, `No.${p.no}`));
-      // the site's ▾: its own script picks up any such button and opens its menu on it
-      if (p.menu) end.append(el('button', { type: 'button', class: 'post-menu-toggle', 'data-no': String(p.no), 'data-report-url': p.menu, 'aria-label': '貼文操作選單', 'aria-haspopup': 'true', 'aria-expanded': 'false' }, '▾'));
-      head.append(end);
-      art.append(head);
-      if (p.id) art.dataset.id = p.id;
-      if (p.vote) {
-        const fold = el('div', { class: 'kr-fold' });
-        fold.append(el('span'), el('button', { type: 'button', class: 'kr-fold-toggle' }, '展開'));
-        art.append(fold);
-      }
-      if (p.media) art.append(renderMedia(p.media));
-      const text = el('div', { class: 'kr-post-text' });
-      if (p.quote) text.append(...cleanQuote(p.quote).childNodes);
-      for (const a of text.querySelectorAll('a')) {
-        // classic boards write >>No.N as a script link, which cleanQuote has already emptied: keep it as a quote
-        const bare = /^>>\s*(?:No\.)?(\d+)$/.exec(a.textContent.trim());
-        const href = a.getAttribute('href') || (bare ? `#r${bare[1]}` : '');
-        if (!href) continue;
-        const local = /^#r(\d+)$/.exec(href);
-        const link = local ? { res, post: Number(local[1]) } : threadLink(href, location.href);
-        if (link && link.res === res && link.post && byNo.has(link.post)) {
-          a.className = 'kr-q';
-          a.dataset.no = String(link.post);
-          a.setAttribute('href', `#kr-p${link.post}`);
-          a.removeAttribute('target');
-          if (!backs.has(link.post)) backs.set(link.post, new Set());
-          backs.get(link.post).add(p.no);
-        } else if (link) {
-          a.className = 'kr-q-thread';
-          a.dataset.res = String(link.res);
-          if (link.post) a.dataset.post = String(link.post);
-          a.removeAttribute('target');
-        } else if (!href.startsWith('#')) {
-          // anything else leaves the board: a new tab, so the list, the thread and a draft stay
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer nofollow';
-        }
-      }
-      art.append(text);
-      if (p.tags?.length) {
-        const tags = el('div', { class: 'kr-tags' });
-        // a new tab: the open thread and a draft in the form stay where they are
-        for (const t of p.tags) tags.append(el('a', { class: 'kr-tag', href: t.href, target: '_blank', rel: 'noopener' }, t.name));
-        if (p.propose) tags.append(el('a', { class: 'kr-tag-propose tagproposal-open', 'data-no': String(p.no), href: p.propose, target: '_blank', rel: 'noopener' }, '建議追加／移除標籤'));
-        art.append(tags);
-      }
-      if (p.vote) {
-        if (p.vote.no) {
-          const bar = el('div', { class: 'kr-vote' });
-          bar.append(voteSlot(p.vote));
-          art.append(bar);
-        }
-        syncFold(art, p.vote.no ? undefined : p.vote.state);
-      }
-      return art;
-    });
-    for (const art of articles) {
-      const from = backs.get(Number(art.dataset.no));
-      if (!from) continue;
-      const foot = el('footer', { class: 'kr-backlinks' }, '↩ ');
-      for (const n of [...from].sort((a, b) => a - b)) foot.append(el('a', { class: 'kr-q', href: `#kr-p${n}`, 'data-no': String(n) }, `>>${n}`));
-      art.append(foot);
-    }
-    // 同串 ID, as the site used to show it: how many posts each ID has here, coloured by that, once the thread is whole
-    // (a board card holds only the latest replies, and a paged 2cat thread one page); a count that would change under
-    // the reader is not shown
-    if (!note && !posts.more) {
-      const counts = new Map();
-      for (const p of posts) if (p.id) counts.set(p.id, (counts.get(p.id) || 0) + 1);
-      for (const b of articles.map((a) => a.querySelector('.kr-post-id')).filter(Boolean)) {
-        const n = counts.get(b.dataset.id) || 1;
-        b.dataset.level = String(n >= 7 ? 3 : n >= 4 ? 2 : n >= 2 ? 1 : 0);
-        b.append(el('span', { class: 'kr-id-n' }, n > 1 ? ` ×${n}` : ' 單發'));
-      }
-    }
-    const focus = pane.el.dataset.focusId;
-    if (focus) for (const a of articles) a.classList.toggle('kr-id-focus', a.dataset.id === focus);
+    pane.counted = !note && !posts.more;
+    seenFresh();
+    const articles = posts.map((p) => postArticle(res, p, byNo));
     pane.body.replaceChildren(...articles, ...(note ? [el('div', { class: 'kr-loading' }, note)] : []));
     if (posts.more) {
       const more = el('button', { type: 'button', class: 'kr-btn kr-more' }, '這串分頁了，這裡是最後一頁 · 載入全部');
       more.addEventListener('click', () => openThread(res, { all: true }));
       articles[0].after(more);
     }
+    threadMarks();
     filterPane();
   }
 
@@ -1969,12 +2007,26 @@ html.kr-portal .kr-side { border-right: 0; }
     const reload = el('button', { type: 'button', class: 'kr-btn', title: '重新載入這串' }, '↻');
     actions.append(reply, newtab, reload);
     const close = el('button', { type: 'button', class: 'kr-btn kr-pane-close', 'aria-label': '關閉', title: '關閉（Esc）' }, '×');
-    head.append(back, titles, actions, close);
+    const fresh = el('button', { type: 'button', class: 'kr-pane-new', hidden: '' });
+    head.append(back, titles, actions, close, fresh);
     const body = el('div', { class: 'kr-pane-body' });
     const preview = el('div', { class: 'kr-preview', hidden: '' });
     pane.append(resize, head, body);
     document.body.append(pane, preview);
-    const p = (state.pane = { el: pane, body, title, sub, newtab, preview, res: null, full: false, seq: 0 });
+    const p = (state.pane = { el: pane, body, title, sub, newtab, preview, newBtn: fresh, res: null, full: false, seq: 0, unseen: 0, pollTimer: null, polling: false });
+
+    fresh.addEventListener('click', () => {
+      body.querySelector('.kr-new-mark')?.scrollIntoView({ block: 'start' });
+      seenFresh();
+    });
+    // scrolled to by hand, the new replies are seen too
+    body.addEventListener('scroll', () => p.unseen && markInView() && seenFresh(), { passive: true });
+    // a tab in the background asks for nothing; brought to the front, it asks at once
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !p.res || !p.full || p.polling) return;
+      clearTimeout(p.pollTimer);
+      pollThread(p.res, p.seq);
+    });
 
     let width = null;
     try {
@@ -2261,6 +2313,7 @@ html.kr-portal .kr-side { border-right: 0; }
     p.body.scrollTop = again ? p.body.scrollTop + again.getBoundingClientRect().top - view - offset : 0;
     p.full = true;
     setPaneTitle(res, posts);
+    schedulePoll();
     if (post) flashPost(post);
     // the next row is the likeliest next read (j): fetch it while this one is being read
     const next = document.querySelector(`#threads .thread[data-no="${res}"]`)?.nextElementSibling;
@@ -2272,6 +2325,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const p = state.pane;
     if (!p) return;
     clearTimeout(openTimer);
+    clearTimeout(p.pollTimer);
     root.classList.remove('kr-pane-open');
     selectCard(null);
     p.res = null;
@@ -2280,7 +2334,74 @@ html.kr-portal .kr-side { border-right: 0; }
     p.seq++;
     p.body.replaceChildren();
     p.preview.hidden = true;
+    seenFresh();
     if (!hasDraft()) composerNew();
+  }
+
+  // 自動更新回文: an open thread, in a tab in front, asks for its page again every half minute (less often while it stays
+  // quiet) and puts what is new on the end, leaving what is on screen as it is: a video playing, a fold opened
+  const POLL_MS = 30000;
+  function schedulePoll(idle = 0) {
+    const p = state.pane;
+    clearTimeout(p.pollTimer);
+    // ponytail: 30 s, then 60 s and 120 s while nothing comes; slower if the site ever asks readers to ask less
+    p.pollTimer = setTimeout(pollThread, (state.pollMs || POLL_MS) * 2 ** Math.min(idle, 2), p.res, p.seq, idle);
+  }
+
+  async function pollThread(res, seq, idle = 0) {
+    const p = state.pane;
+    if (p.res !== res || p.seq !== seq || !p.full || p.polling || document.visibilityState !== 'visible') return;
+    p.polling = true;
+    let fresh = [];
+    try {
+      // the page as the board serves it: the whole thread on 綜合, the last page on 2cat (where new replies land)
+      fresh = freshPosts(p.posts.keys(), await loadThread(res, true));
+    } catch {
+      // a busy server or a thread gone: asked again later, more slowly
+      fresh = [];
+    } finally {
+      p.polling = false;
+    }
+    if (p.res !== res || p.seq !== seq) return;
+    if (fresh.length) appendPosts(res, fresh);
+    schedulePoll(fresh.length ? 0 : idle + 1);
+  }
+
+  function appendPosts(res, fresh) {
+    const p = state.pane;
+    for (const post of fresh) p.posts.set(post.no, post);
+    const byNo = new Set(p.posts.keys());
+    const articles = fresh.map((post) => postArticle(res, post, byNo));
+    const last = [...p.body.querySelectorAll(':scope > .kr-post')].pop();
+    if (last) last.after(...articles);
+    else p.body.append(...articles);
+    threadMarks();
+    filterPane();
+    setPaneTitle(res, [...p.posts.values()]);
+    // what is told is what the reader's own filters let through
+    const shown = articles.filter((a) => !a.classList.contains('kr-hidden'));
+    if (!shown.length) return;
+    // the line sits above the first new reply not yet seen; more arriving before then add to it
+    if (!p.unseen) {
+      p.body.querySelector('.kr-new-mark')?.remove();
+      shown[0].before(el('div', { class: 'kr-new-mark', role: 'separator' }, '新回應'));
+    }
+    p.unseen += shown.length;
+    if (markInView()) return seenFresh();
+    p.newBtn.textContent = `↓ ${p.unseen} 則新回應`;
+    p.newBtn.hidden = false;
+  }
+
+  function markInView() {
+    const p = state.pane;
+    const mark = p.body.querySelector('.kr-new-mark');
+    return !mark || mark.getBoundingClientRect().top < p.body.getBoundingClientRect().bottom - 40;
+  }
+
+  function seenFresh() {
+    const p = state.pane;
+    p.unseen = 0;
+    p.newBtn.hidden = true;
   }
 
   // ---- the board page's own header, folded into a toolbar
