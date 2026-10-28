@@ -1286,9 +1286,15 @@ try {
     await up.evaluate(() => (window.__krState.pollMs = 500));
     const asked = [];
     let added = null;
+    // the reply is answered only once the posts drawn before it are marked
+    let snapped;
+    const snap = new Promise((ok) => (snapped = ok));
     await up.route(new RegExp(`[?&]res=${live}(?:[&#]|$)`), async (r) => {
+      // anything but a plain GET goes on to the context's guard, which stops it
+      if (r.request().method() !== 'GET') return r.fallback();
       asked.push(Date.now());
-      if (asked.length !== 2) return r.continue();
+      if (asked.length !== 2) return r.fallback();
+      await snap;
       const resp = await r.fetch();
       const made = await up.evaluate(({ html, res }) => {
         const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -1314,12 +1320,16 @@ try {
       const lastId = arts[arts.length - 1].dataset.id || null;
       return { n: arts.length, lastId, sameId: lastId ? arts.filter((a) => a.dataset.id === lastId).length : 0 };
     });
+    snapped();
     const grew = await up.waitForFunction(() => !!document.querySelector('.kr-new-mark'), null, { timeout: 8000 }).then(() => true, () => false);
     const after = await up.evaluate(({ added, res }) => {
       const arts = [...document.querySelectorAll('.kr-pane-body > .kr-post')];
       const neu = document.getElementById(`kr-p${added}`);
       const pill = document.querySelector('.kr-pane-new');
+      const mark = document.querySelector('.kr-new-mark')?.getBoundingClientRect();
       return {
+        // a thread short enough that the new reply is already in sight has nothing to point to
+        markInSight: !!mark && mark.top < document.querySelector('.kr-pane-body').getBoundingClientRect().bottom - 40,
         n: arts.length,
         kept: arts.filter((a) => a.dataset.e2eKept === '1').length,
         last: arts[arts.length - 1]?.id === `kr-p${added}`,
@@ -1330,19 +1340,23 @@ try {
         idN: neu?.querySelector('.kr-id-n')?.textContent.trim() || null,
       };
     }, { added, res: live });
-    check('自動更新: a new reply in the open thread is added on the end, with a line above it and a pill saying so',
-      grew && !!added && after.n === before.n + 1 && after.last && after.markBefore && /↓ 1 則新回應/.test(after.pill || '') && after.sub.includes(`${after.n - 1} 則回應`), JSON.stringify({ before, after, asked: asked.length }));
+    check('自動更新: a new reply in the open thread is added on the end, with a line above it and, out of sight, a pill saying so',
+      grew && !!added && after.n === before.n + 1 && after.last && after.markBefore && (after.markInSight ? after.pill === null : /↓ 1 則新回應/.test(after.pill || '')) && after.sub.includes(`${after.n - 1} 則回應`), JSON.stringify({ before, after, asked: asked.length }));
     check('自動更新: the posts already drawn stay as they were (the same nodes), not drawn again', after.kept === before.n, JSON.stringify({ kept: after.kept, of: before.n }));
     check('自動更新: what the new reply changes in the rest of the thread follows — its quote shows under the OP, its ID\'s count goes up',
       after.opBack && (!before.lastId || after.idN === `×${before.sameId + 1}`), JSON.stringify({ opBack: after.opBack, lastId: before.lastId, sameId: before.sameId, idN: after.idN }));
-    await up.locator('.kr-pane-new').click().catch(() => null);
-    await up.waitForTimeout(800);
-    const went = await up.evaluate(() => {
-      const mark = document.querySelector('.kr-new-mark').getBoundingClientRect();
-      const body = document.querySelector('.kr-pane-body').getBoundingClientRect();
-      return { pillHidden: document.querySelector('.kr-pane-new').hidden, markInView: mark.top >= body.top - 2 && mark.top < body.bottom };
-    });
-    check('自動更新: the pill takes the thread to the new replies and goes', went.pillHidden && went.markInView, JSON.stringify(went));
+    if (after.pill) {
+      await up.locator('.kr-pane-new').click().catch(() => null);
+      await up.waitForTimeout(800);
+      const went = await up.evaluate(() => {
+        const mark = document.querySelector('.kr-new-mark').getBoundingClientRect();
+        const body = document.querySelector('.kr-pane-body').getBoundingClientRect();
+        return { pillHidden: document.querySelector('.kr-pane-new').hidden, markInView: mark.top >= body.top - 2 && mark.top < body.bottom };
+      });
+      check('自動更新: the pill takes the thread to the new replies and goes', went.pillHidden && went.markInView, JSON.stringify(went));
+    } else {
+      console.log(`NOTE  自動更新: the busiest thread is short enough that the new reply was in sight; the pill was not exercised ${JSON.stringify({ n: after.n })}`);
+    }
     // a tab in the background: no asking at all over several rounds; in front again: it asks at once
     await up.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
@@ -1445,10 +1459,11 @@ try {
         const tab = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('a[href*="load=mod_islandersync"]')].map((a) => [a.textContent.trim(), new URL(a.getAttribute('href'), location.href).searchParams.get('view')]);
         return { threads: tab.some(([t, v]) => t === '參與討論' && v === 'threads'), likes: tab.some(([t, v]) => t === '按讚留言' && v === 'likes') };
       }, () => null);
-      return { want, got, tabs, shown: !!sec && sec.height > 0 && sec.left >= side.left && sec.right <= side.right && sec.top >= side.top };
+      const targets = [...document.querySelectorAll('.kr-side-mine a')].map((a) => a.target);
+      return { center: !!center, want, got, targets, tabs, shown: !!sec && sec.height > 0 && sec.left >= side.left && sec.right <= side.right && sec.top >= side.top };
     });
-    check('追蹤: on 綜合 the sidebar points to the site\'s own 參與討論, 按讚留言 and 圖書館, as its header links them',
-      !!mine.want[0][1] && JSON.stringify(mine.got) === JSON.stringify(mine.want) && mine.shown && mine.tabs?.threads && mine.tabs?.likes, JSON.stringify(mine));
+    check('追蹤: on 綜合 the sidebar points to the site\'s own 參與討論, 按讚留言 and 圖書館, as its header links them, in place',
+      mine.center && JSON.stringify(mine.got) === JSON.stringify(mine.want) && mine.targets.every((t) => t === '_self') && mine.shown && mine.tabs?.threads && mine.tabs?.likes, JSON.stringify(mine));
     await sp.goto('https://2cat.org/cellphone/', { waitUntil: 'load', timeout: 45000 }).catch(() => null);
     const cat = await sp.waitForSelector('.kr-toolbar', { timeout: 20000 }).then(() => true, () => false) && await sp.evaluate(() => ({ side: !!document.querySelector('.kr-side'), mine: !!document.querySelector('.kr-side-mine') }));
     check('追蹤: 2cat, with no such pages, has no such section', !!cat && cat.side && !cat.mine, JSON.stringify(cat));

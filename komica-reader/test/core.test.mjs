@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = readFileSync(new URL('../komica-reader.user.js', import.meta.url), 'utf8');
 const sandbox = { module: { exports: {} }, URL };
 vm.runInNewContext(src, sandbox);
-const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, boardKey, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
+const { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, pagesBetween, boardKey, MIN_W, MAX_W, LIST_MIN } = sandbox.module.exports;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const BOARD = 'https://gaia.komica1.org/00b/index.htm';
@@ -273,4 +273,14 @@ test('原站版面 is remembered per board: its pages, category views and thread
   assert.equal(boardKey('https://2cat.uk/index.php'), '2cat.uk/'); // a file at the root is not a directory
   assert.equal(boardKey('javascript:alert(1)'), null);
   assert.equal(boardKey('not a url'), null);
+});
+
+test('a paged thread that has started a page since it was read asks for the pages between, so no reply is passed over', () => {
+  assert.deepEqual(plain(pagesBetween(9, 9)), []); // still the same page: the newest page is all there is to ask
+  assert.deepEqual(plain(pagesBetween(9, 10)), [9]); // a reply may have landed on page 9 just before page 10 began
+  assert.deepEqual(plain(pagesBetween(8, 10)), [8, 9]);
+  assert.deepEqual(plain(pagesBetween(NaN, 1)), [0]); // read when it had no pages yet
+  assert.deepEqual(plain(pagesBetween(NaN, NaN)), []); // 綜合: never paged
+  assert.deepEqual(plain(pagesBetween(5, NaN)), []);
+  assert.deepEqual(plain(pagesBetween(10, 9)), []); // fewer pages than before (deleted replies): nothing between
 });

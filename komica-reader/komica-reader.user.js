@@ -459,6 +459,14 @@
     return fetched.filter((p) => p.no > newest && !have.has(p.no) && !seen.has(p.no) && seen.add(p.no)).sort((a, b) => a.no - b.no);
   }
 
+  // a paged thread (2cat) asked for again shows its newest page; when that is a later page than the one last read, the
+  // pages from that one up to the newest are asked for too (an unpaged thread that has since grown pages counts as page 0)
+  function pagesBetween(seen, newest) {
+    const pages = [];
+    if (Number.isFinite(newest)) for (let n = Number.isFinite(seen) ? seen : 0; n < newest; n++) pages.push(n);
+    return pages;
+  }
+
   // which board a page belongs to, for remembering 原站版面 per board: the host and the board's directory, so its
   // pages, category views and threads share it (2cat answers /~career/ as /career/)
   function boardKey(href) {
@@ -472,7 +480,7 @@
   }
 
   if (typeof window === 'undefined') {
-    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, boardKey, MIN_W, MAX_W, LIST_MIN };
+    module.exports = { threadLink, insertQuote, clampWidth, omittedCount, shortTime, stepIndex, normalizeBoardUrl, knownBoard, matchBoard, filterBoards, ageVerdict, mediaKind, fileDims, postOutcome, postedProbe, assignsLocation, confirmPosted, webUrl, fileBase, freshPosts, pagesBetween, boardKey, MIN_W, MAX_W, LIST_MIN };
     return;
   }
 
@@ -868,7 +876,8 @@ html.kr .kr-side-search { width: 100%; box-sizing: border-box; padding: 6px 10px
   background-repeat: no-repeat; background-position: 9px 50%; color: var(--kr-text); font: 13px var(--kr-font); outline: none; }
 html.kr .kr-side-search:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kr-accent) 40%, transparent); }
 html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 16px; }
-html.kr .kr-side-mine { flex: none; margin: 0; padding: 0 8px 6px; border-bottom: .5px solid var(--kr-sep); }
+html.kr .kr-side-mine { flex: none; margin: 0 0 4px; padding: 0 8px 6px; border-bottom: .5px solid var(--kr-sep); }
+html.kr .kr-side-mine .kr-side-group-toggle { cursor: default; }
 html.kr .kr-side-group { margin-bottom: 4px; }
 html.kr .kr-side-group-toggle { width: 100%; padding: 10px 6px 4px; border: 0; background: none; text-align: left; font-size: 11px !important;
   font-weight: 600 !important; color: var(--kr-text2) !important; }
@@ -2001,7 +2010,11 @@ html.kr-portal .kr-side { border-right: 0; }
         }
       };
       await Promise.all([worker(), worker(), worker(), worker()]);
-      return [...byNo.values()].sort((a, b) => b.op - a.op || a.no - b.no);
+      const all = [...byNo.values()].sort((a, b) => b.op - a.op || a.no - b.no);
+      // the last page, which 自動更新 asks for again
+      all.page = base.page;
+      all.param = base.param;
+      return all;
     });
   }
 
@@ -2286,6 +2299,7 @@ html.kr-portal .kr-side { border-right: 0; }
       p.el.classList.remove('kr-reveal', 'kr-id-focusing');
       delete p.el.dataset.focusId;
       p.body.scrollTop = 0;
+      seenFresh();
       // what the board already shows (the OP and its latest replies) goes up at once; the rest follows the fetch
       const card = document.querySelector(`#threads .thread[data-no="${res}"]`);
       if (card) renderPosts(res, readPosts(card), '正在載入其餘回應⋯');
@@ -2314,6 +2328,8 @@ html.kr-portal .kr-side { border-right: 0; }
       box.append(el('br'), retry, tab);
       p.body.querySelector('.kr-loading')?.remove();
       p.body.append(box);
+      // a ↻ that failed leaves the thread drawn before it: that one goes on updating
+      if (p.full) schedulePoll(1);
       return;
     }
     if (p.res !== res || p.seq !== seq) return;
@@ -2325,6 +2341,7 @@ html.kr-portal .kr-side { border-right: 0; }
     const again = anchor && p.body.querySelector(`#kr-p${anchor.dataset.no}`);
     p.body.scrollTop = again ? p.body.scrollTop + again.getBoundingClientRect().top - view - offset : 0;
     p.full = true;
+    p.page = posts.page;
     setPaneTitle(res, posts);
     schedulePoll();
     if (post) flashPost(post);
@@ -2366,25 +2383,38 @@ html.kr-portal .kr-side { border-right: 0; }
     if (p.res !== res || p.seq !== seq || !p.full || p.polling || document.visibilityState !== 'visible') return;
     p.polling = true;
     let fresh = [];
+    let page = p.page;
     try {
       // the page as the board serves it: the whole thread on 綜合, the last page on 2cat (where new replies land)
-      fresh = freshPosts(p.posts.keys(), await loadThread(res, true));
+      const last = await within(loadThread(res, true), 20000);
+      const got = [...last];
+      // a paged thread (2cat) that has started a page since it was last asked: the pages between are asked for too, or
+      // replies that landed on them in the meantime would be passed over for good
+      for (const n of pagesBetween(p.page, last.page)) got.push(...(await within(fetchThread(res, n, last.param), 20000)));
+      fresh = freshPosts(p.posts.keys(), got);
+      page = last.page;
     } catch {
-      // a busy server or a thread gone: asked again later, more slowly
+      // ponytail: a busy server and a thread gone look alike here, both asked again later, more slowly; a 已不在站上 note
+      // if the board ever answers a gone thread in a way that cannot be a passing failure
       fresh = [];
     } finally {
       p.polling = false;
     }
     if (p.res !== res || p.seq !== seq) return;
-    if (fresh.length) appendPosts(res, fresh);
-    schedulePoll(fresh.length ? 0 : idle + 1);
+    try {
+      if (fresh.length) appendPosts(res, fresh);
+      p.page = page;
+    } finally {
+      schedulePoll(fresh.length ? 0 : idle + 1);
+    }
   }
 
   function appendPosts(res, fresh) {
     const p = state.pane;
-    for (const post of fresh) p.posts.set(post.no, post);
-    const byNo = new Set(p.posts.keys());
+    const byNo = new Set([...p.posts.keys(), ...fresh.map((post) => post.no)]);
+    // drawn first, then known: a post that cannot be drawn is asked for again next time, not taken as shown
     const articles = fresh.map((post) => postArticle(res, post, byNo));
+    for (const post of fresh) p.posts.set(post.no, post);
     const last = [...p.body.querySelectorAll(':scope > .kr-post')].pop();
     if (last) last.after(...articles);
     else p.body.append(...articles);
@@ -2477,12 +2507,13 @@ html.kr-portal .kr-side { border-right: 0; }
     const link = (load) => document.querySelector(`#header #toplink a[href*="load=${load}"]`)?.getAttribute('href');
     const center = link('mod_islandersync');
     if (!side || !center || side.querySelector('.kr-side-mine')) return;
-    const section = el('section', { class: 'kr-side-group kr-side-mine', 'aria-label': '我的（站方個人中心）' });
+    const section = el('section', { class: 'kr-side-mine', 'aria-label': '我的（站方個人中心）' });
     section.append(el('div', { class: 'kr-side-group-toggle', title: '站方的個人中心與圖書館' }, '我的'));
     for (const [label, href] of [['參與討論', `${center}&view=threads`], ['按讚留言', `${center}&view=likes`], ['圖書館', link('mod_library')]]) {
       if (!href) continue;
       const row = el('div', { class: 'kr-side-row' });
-      row.append(el('a', { href }, label));
+      // as the board links: inside another site's frame the page opens as itself, its cookies and storage working
+      row.append(el('a', { href, target: framedElsewhere(href) ? '_top' : '_self' }, label));
       section.append(row);
     }
     side.querySelector('.kr-side-head').after(section);
