@@ -1415,6 +1415,44 @@ try {
   }
   await octx.close();
 
+  // 追蹤 is the site's own (個人中心: 參與討論、按讚留言; 圖書館 keeps threads): on 綜合 the sidebar points there, with the
+  // links the site's own header has, to pages that have those tabs; 2cat has no such pages and no such section.
+  // (個人中心 loads its lists by posting this browser's id, which no test here sends: where the links go is what is checked.)
+  const sctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW', colorScheme: 'light' });
+  await sctx.addInitScript(wrapped);
+  await sctx.route(/^https:\/\/(gaia\.komica1\.org|(www\.)?2cat\.org)\//, (r) => {
+    const q = r.request();
+    if (q.method() === 'POST' && /^mode=edit_links&/.test(q.postData() || '')) return r.continue();
+    return q.method() === 'GET' && !/mod_report/.test(q.url()) ? r.continue() : r.abort();
+  });
+  const sp = await sctx.newPage();
+  await sp.goto(BOARD, { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+  if (await sp.waitForSelector('.kr-toolbar', { timeout: 20000 }).catch(() => null)) {
+    const mine = await sp.evaluate(async () => {
+      const site = (load) => [...document.querySelectorAll('#toplink a')].find((a) => a.getAttribute('href')?.includes(`load=${load}`))?.href;
+      const center = site('mod_islandersync');
+      const want = [['參與討論', `${center}&view=threads`], ['按讚留言', `${center}&view=likes`], ['圖書館', site('mod_library')]];
+      const got = [...document.querySelectorAll('.kr-side-mine .kr-side-row a')].map((a) => [a.textContent, a.href]);
+      const sec = document.querySelector('.kr-side-mine')?.getBoundingClientRect();
+      const side = document.querySelector('.kr-side').getBoundingClientRect();
+      // the pages themselves: 個人中心 with the tab each link names
+      const tabs = await (await fetch(want[0][1])).text().then((html) => {
+        const tab = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('a[href*="load=mod_islandersync"]')].map((a) => [a.textContent.trim(), new URL(a.getAttribute('href'), location.href).searchParams.get('view')]);
+        return { threads: tab.some(([t, v]) => t === '參與討論' && v === 'threads'), likes: tab.some(([t, v]) => t === '按讚留言' && v === 'likes') };
+      }, () => null);
+      return { want, got, tabs, shown: !!sec && sec.height > 0 && sec.left >= side.left && sec.right <= side.right && sec.top >= side.top };
+    });
+    check('追蹤: on 綜合 the sidebar points to the site\'s own 參與討論, 按讚留言 and 圖書館, as its header links them',
+      !!mine.want[0][1] && JSON.stringify(mine.got) === JSON.stringify(mine.want) && mine.shown && mine.tabs?.threads && mine.tabs?.likes, JSON.stringify(mine));
+    await sp.goto('https://2cat.org/cellphone/', { waitUntil: 'load', timeout: 45000 }).catch(() => null);
+    const cat = await sp.waitForSelector('.kr-toolbar', { timeout: 20000 }).then(() => true, () => false) && await sp.evaluate(() => ({ side: !!document.querySelector('.kr-side'), mine: !!document.querySelector('.kr-side-mine') }));
+    check('追蹤: 2cat, with no such pages, has no such section', !!cat && cat.side && !cat.mine, JSON.stringify(cat));
+  } else {
+    console.log('UNVERIFIABLE  追蹤: the board did not load');
+    code = 2;
+  }
+  await sctx.close();
+
   // on a phone (as one: its user agent and touch): nothing of the site's own page shows above the toolbar, a menu button
   // stays on the line of what it belongs to wherever a header breaks, and 2cat's own ↑ ⟳ ↓ are not under the floating form
   const mctx = await browser.newContext({ ...devices['iPhone 15 Pro'], deviceScaleFactor: 1, locale: 'zh-TW', colorScheme: 'dark' });

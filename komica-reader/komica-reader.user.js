@@ -868,6 +868,7 @@ html.kr .kr-side-search { width: 100%; box-sizing: border-box; padding: 6px 10px
   background-repeat: no-repeat; background-position: 9px 50%; color: var(--kr-text); font: 13px var(--kr-font); outline: none; }
 html.kr .kr-side-search:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kr-accent) 40%, transparent); }
 html.kr .kr-side-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 16px; }
+html.kr .kr-side-mine { flex: none; margin: 0; padding: 0 8px 6px; border-bottom: .5px solid var(--kr-sep); }
 html.kr .kr-side-group { margin-bottom: 4px; }
 html.kr .kr-side-group-toggle { width: 100%; padding: 10px 6px 4px; border: 0; background: none; text-align: left; font-size: 11px !important;
   font-weight: 600 !important; color: var(--kr-text2) !important; }
@@ -2468,6 +2469,25 @@ html.kr-portal .kr-side { border-right: 0; }
     document.body.prepend(bar);
   }
 
+  // 追蹤 is the site's own: its 個人中心 lists the threads one has posted in (參與討論) and the posts one has liked
+  // (按讚留言), and its 圖書館 keeps threads. The sidebar points there, with the links the site's own header has (綜合
+  // has them; 2cat does not)
+  function setupMine() {
+    const side = document.querySelector('.kr-side');
+    const link = (load) => document.querySelector(`#header #toplink a[href*="load=${load}"]`)?.getAttribute('href');
+    const center = link('mod_islandersync');
+    if (!side || !center || side.querySelector('.kr-side-mine')) return;
+    const section = el('section', { class: 'kr-side-group kr-side-mine', 'aria-label': '我的（站方個人中心）' });
+    section.append(el('div', { class: 'kr-side-group-toggle', title: '站方的個人中心與圖書館' }, '我的'));
+    for (const [label, href] of [['參與討論', `${center}&view=threads`], ['按讚留言', `${center}&view=likes`], ['圖書館', link('mod_library')]]) {
+      if (!href) continue;
+      const row = el('div', { class: 'kr-side-row' });
+      row.append(el('a', { href }, label));
+      section.append(row);
+    }
+    side.querySelector('.kr-side-head').after(section);
+  }
+
   // ---- the board page's list rows
   function decorateThreads() {
     for (const card of document.querySelectorAll('#threads .thread')) {
@@ -2541,6 +2561,7 @@ html.kr-portal .kr-side { border-right: 0; }
       wrapThreads(document.getElementById('threads'));
     }
     setupToolbar();
+    setupMine();
     setupPane();
     composerNew();
     decorateThreads();
